@@ -1,132 +1,103 @@
 # config_store.py
 # ============================================================
-# Configuration Store & Permission Helpers
+# Stores and retrieves per-guild configuration from SQLite.
 #
-# This module is responsible for:
-# - Sorting per-guild configuration (channels, roles)
-# - Retrieving configuration for commands to use
-# - Centralising permission checks (admin / voter)
-#
-# This keeps SQL and permission logic OUT of individual
-# command files, making the codebase cleaner and safer.
+# - guild_settings table holds channel IDs + role IDs.
+# - /setup uses upsert_settings() to save config.
+# - commands use get_settings() to read config.
+# - is_admin() / has_voter_role() help with permissions.
 # ============================================================
 
-import discord
 import sqlite3
+import discord
 
-# ------------------------------------------------------------
-# Fetch guild configuration
-# ------------------------------------------------------------
+
 def get_settings(conn: sqlite3.Connection, guild_id: int) -> dict | None:
     """
-    Retrieve the configuration for a guild.
-
-    Returns:
-        dict -> Configuration fields (column_name -> value)
-        None -> If the guild has not been configured yet
+    Returns the guild settings as a dict, or None if not configured.
     """
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT * FROM guild_settings WHERE guild_id = ?",
-        (guild_id,)
-    )
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM guild_settings WHERE guild_id = ?", (guild_id,))
+    row = cur.fetchone()
+    return dict(row) if row else None
 
-    row = cursor.fetchone()
 
-    # If no configuration found yet, return None
-    if row is None:
-        return None
-    
-    # Convert sqlite row into a regular dictionary
-    return dict(row)
-
-# ------------------------------------------------------------
-# Insert or update guild configuration
-# ------------------------------------------------------------
-def upsert_settings(conn: sqlite3.Connection, guild_id: int, **fields) -> None:
+def upsert_settings(
+    conn: sqlite3.Connection,
+    guild_id: int,
+    nominees_channel_id: int | None = None,
+    elections_channel_id: int | None = None,
+    laws_channel_id: int | None = None,
+    log_channel_id: int | None = None,
+    voter_role_id: int | None = None,
+    admin_role_id: int | None = None,
+) -> None:
     """
-    Insert or update the configuration for a guild.
+    Insert or update guild settings.
 
-    This function is used by the /setup command.
-
-    Example:
-        upsert_settings(
-            conn,
-            guild_id,
-            elections_channel_id=128,
-            voter_role_id_456
-        )
+    We only write the columns that were provided (not None),
+    so you can update config incrementally if you want.
     """
-    cursor = conn.cursor()
+    # Build a dict of fields we actually want to write
+    fields: dict[str, int] = {}
 
-    # Column names to update (e.g. elections_channel_id, voter_role_id)
-    columns = ", ".join(fields.keys())
+    if nominees_channel_id is not None:
+        fields["nominees_channel_id"] = nominees_channel_id
+    if elections_channel_id is not None:
+        fields["elections_channel_id"] = elections_channel_id
+    if laws_channel_id is not None:
+        fields["laws_channel_id"] = laws_channel_id
+    if log_channel_id is not None:
+        fields["log_channel_id"] = log_channel_id
+    if voter_role_id is not None:
+        fields["voter_role_id"] = voter_role_id
+    if admin_role_id is not None:
+        fields["admin_role_id"] = admin_role_id
 
-    # SQL placeholders (?, ?, ?, ...)
-    placeholders = ", ".join(fields())
+    # Nothing to update
+    if not fields:
+        return
 
-    # Used for ON CONFLICT UPDATE clause
-    updates = ", ".join([f"{key} = excluded.{key}" for key in fields.keys()])
+    # Ensure the row exists first (so UPDATE always works)
+    cur = conn.cursor()
+    cur.execute("INSERT OR IGNORE INTO guild_settings (guild_id) VALUES (?)", (guild_id,))
 
-    cursor.execute(
-        f"""
-        INSERT INTO guild_settings (guild_id, {columns})
-        VALUES (?, {placeholders})
-        ON CONFLICT(guild_id) DO UPDATE SET {updates}
-        """,
-        (guild_id, *fields.values())
-    )
+    # Build UPDATE statement dynamically
+    set_clause = ", ".join([f"{k} = ?" for k in fields.keys()])
+    values = list(fields.values()) + [guild_id]
 
+    cur.execute(f"UPDATE guild_settings SET {set_clause} WHERE guild_id = ?", values)
     conn.commit()
 
-# ------------------------------------------------------------
-# Admin permission check
-# ------------------------------------------------------------
+
+def has_voter_role(member: discord.Member, settings: dict | None) -> bool:
+    """
+    True if member has the configured voter role.
+    """
+    if not settings:
+        return False
+    voter_role_id = settings.get("voter_role_id")
+    if not voter_role_id:
+        return False
+    return any(r.id == int(voter_role_id) for r in member.roles)
+
+
 def is_admin(interaction: discord.Interaction, settings: dict | None) -> bool:
     """
-    Determine whether the user is allowed to run admin commands.
-
-    Permission rules:
-    - Discord server administrators are ALWAYS allowed
-    - Users with the configured admin_role_id are allowed
-    - Everyone else is denied
+    True if the user is a Discord admin OR has the configured admin role.
     """
-    # Rule 1: Discord administrator permission
+    if not interaction.guild or not isinstance(interaction.user, discord.Member):
+        return False
+
+    # Discord administrators always allowed
     if interaction.user.guild_permissions.administrator:
         return True
 
-    # Rule 2: Configured admin role
-    if settings and settings.get("admin_role_id"):
-        admin_role_id = discord.utils.get(
-            interaction.user.roles,
-            id=int(settings["admin_role_id"])
-        )
-        return admin_role_id is not None
-
-    # Rule 3: Not an admin
-    return False
-
-# ------------------------------------------------------------
-# Voter role check
-# ------------------------------------------------------------
-def has_voter_role(member: discord.Member, settings: dict) -> bool:
-    """
-    Check whether a guild member has permission to vote.
-
-    This is used by:
-    - Election vote dropdowns
-    - Any future citizen-only actions
-    """
-    voter_role_id = settings.get("voter_role_id")
-
-    # No voter role configured
-    if not voter_role_id:
+    # If admin role configured, allow that too
+    if not settings:
         return False
-    
-    # Check if the member has the voter role
-    voter_role = discord.utils.get(
-        member.roles,
-        id=int(voter_role_id)
-    )
+    admin_role_id = settings.get("admin_role_id")
+    if not admin_role_id:
+        return False
 
-    return voter_role is not None
+    return any(r.id == int(admin_role_id) for r in interaction.user.roles)

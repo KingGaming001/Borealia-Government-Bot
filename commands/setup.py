@@ -5,7 +5,7 @@
 # - nominees channel
 # - elections channel
 # - proposed laws channel
-# - log channel
+# - log channel (optional)
 # - voter role
 # - admin role
 #
@@ -14,10 +14,11 @@
 # ------------------------------------------------------------
 
 import discord
-from discord import app_commands
+from discord import app_commands, Interaction
 from discord.ext import commands
 
 from config_store import get_settings, upsert_settings, is_admin
+
 
 class SetupCommand(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -27,7 +28,8 @@ class SetupCommand(commands.Cog):
         name="setup",
         description="Configure Borealia Government bot channels and roles for this server"
     )
-    @app_commands.description(
+    # ✅ Correct decorator name is describe (not description)
+    @app_commands.describe(
         nominees_channel="Channel where nominations are submitted",
         elections_channel="Channel where election panels + voting are posted",
         laws_channel="Channel where proposed laws are posted",
@@ -37,13 +39,13 @@ class SetupCommand(commands.Cog):
     )
     async def setup(
         self,
-        interaction: discord.Interaction,
+        interaction: Interaction,
         nominees_channel: discord.TextChannel,
         elections_channel: discord.TextChannel,
         laws_channel: discord.TextChannel,
-        log_channel: discord.TextChannel | None,
         voter_role: discord.Role,
-        admin_role: discord.Role
+        admin_role: discord.Role,
+        log_channel: discord.TextChannel | None = None,  # ✅ optional param should have a default
     ):
         # -----------------------------
         # Must be used in a server
@@ -54,7 +56,7 @@ class SetupCommand(commands.Cog):
                 ephemeral=True
             )
             return
-        
+
         # -----------------------------
         # Permission check
         # - Discord admins always allowed
@@ -67,7 +69,7 @@ class SetupCommand(commands.Cog):
                 ephemeral=True
             )
             return
-        
+
         # -----------------------------
         # Save configuration to the database
         # -----------------------------
@@ -78,8 +80,8 @@ class SetupCommand(commands.Cog):
             elections_channel_id=elections_channel.id,
             laws_channel_id=laws_channel.id,
             log_channel_id=log_channel.id if log_channel else None,
-            voter_role_id=voter_role.id, # REQUIRED
-            admin_role_id=admin_role.id  # REQUIRED
+            voter_role_id=voter_role.id,  # REQUIRED
+            admin_role_id=admin_role.id   # REQUIRED
         )
 
         # -----------------------------
@@ -91,12 +93,12 @@ class SetupCommand(commands.Cog):
             color=discord.Color.green()
         )
         embed.add_field(
-            name="Configured Channels",
+            name="Configured Channels & Roles",
             value=(
                 f"• **Nominees Channel:** {nominees_channel.mention}\n"
                 f"• **Elections Channel:** {elections_channel.mention}\n"
                 f"• **Proposed Laws Channel:** {laws_channel.mention}\n"
-                f"• **Log Channel:** {log_channel.mention if log_channel else 'Not Set'}"
+                f"• **Log Channel:** {log_channel.mention if log_channel else 'Not Set'}\n"
                 f"• **Voter Role:** {voter_role.mention}\n"
                 f"• **Admin Role:** {admin_role.mention}\n"
             ),
@@ -104,11 +106,14 @@ class SetupCommand(commands.Cog):
         )
 
         await interaction.response.send_message(embed=embed, ephemeral=True)
-        
+
         if interaction.user.guild_permissions.administrator:
             await interaction.followup.send(
-                "ℹ️ Note: As a server administrator, you can always run /setup again to reconfigure the bot."
+                "ℹ️ Note: As a server administrator, you can always run /setup again to reconfigure the bot.",
+                ephemeral=True
             )
 
-        async def setup(bot: commands.Bot):
-            await bot.add_cog(SetupCommand(bot))
+
+# ✅ This MUST be at top-level (no indentation)
+async def setup(bot: commands.Bot):
+    await bot.add_cog(SetupCommand(bot))

@@ -146,7 +146,11 @@ class StatusCommand(commands.Cog):
             # -----------------------------
             # Send the status privately to the user (ephemeral)
             # -----------------------------
-            await interaction.response.send_message(embed=embed, ephemeral=True)
+            if interaction.response.is_done():
+                await interaction.followup.send(embed=embed, ephemeral=True)
+            else:
+                await interaction.response.send_message(embed=embed, ephemeral=True)
+
 
 async def setup(bot: commands.Bot):
     # Register this command Cog with the bot

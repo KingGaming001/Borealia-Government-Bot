@@ -1,4 +1,9 @@
 # config.py
+import os
+from dotenv import load_dotenv
+
+# Discord bot token (loaded from .env file)
+TOKEN = os.getenv("DISCORD_TOKEN")
 
 # Discord server ID for fast slash-command sync
 GUILD_ID = 1465774294993862863

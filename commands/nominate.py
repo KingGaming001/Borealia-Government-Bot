@@ -19,7 +19,7 @@
 # ------------------------------------------------------------
 
 import discord
-from discord import app_commands
+from discord import app_commands, Interaction
 from discord.ext import commands
 import sqlite3
 
@@ -197,111 +197,110 @@ class NominateCommand(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-        @app_commands.command(name="nominate", description="Nominate yourself for a government position")
-        @app_commands.describe(
-            position="The position you are running for (e.g., Prime Minister)",
-            name="Your name as it displays on the ballot"
-        )
-        async def nominate(self, interaction: discord.Interaction, position: str, name: str):
-            # -----------------------------
-            # Must be used in a server
-            # -----------------------------
-            if not interaction.guild:
-                await interaction.response.send_message(
-                    "❌ This command can only be used in a server.",
-                    ephemeral=True
-                )
-                return
-            
-            guild_id = interaction.guild.id
-
-            # -----------------------------
-            # Ensure the bot has been configured
-            # -----------------------------
-            settings = get_settings(self.bot.db, guild_id)
-            if not settings:
-                await interaction.response.send_message(
-                    "❌ The Borealia Government bot is not yet configured for this server. "
-                    "An administrator can run the /setup command to configure it.",
-                    ephemeral=True
-                )
-                return
-            
-            elections_channel_id = settings.get("elections_channel_id")
-            if not elections_channel_id:
-                await interaction.response.send_message(
-                    "❌ The Borealia Government bot is not properly configured. "
-                    "The elections channel is missing. An administrator can run the /setup command to fix this.",
-                    ephemeral=True
-                )
-                return
-            
-            # -----------------------------
-            # Ensure election exists; prevent nomination if closed
-            # -----------------------------
-            ensure_election_row(self.bot.db, guild_id, position)
-
-            if election_is_closed(self.bot.db, guild_id, position):
-                await interaction.response.send_message(
-                    f"❌ The election for **{position}** is now closed. You cannot nominate yourself.",
-                    ephemeral=True
-                )
-                return
-            
-            # -----------------------------
-            # Insert the nomination
-            # ----------------------------
-            inserted = add_nomination(self.bot.db, guild_id, position, interaction.user.id, name)
-
-            if not inserted:
-                await interaction.response.send_message(
-                    f"❌ You have already nominated yourself for **{position}**.",
-                    ephemeral=True
-                )
-                return
-            
-            # -----------------------------
-            # Build the election panel embed
-            # ----------------------------
-            nominees = get_nominees(self.bot.db, guild_id, position)
-
-            embed = discord.Embed(
-                title=f"🗳️ Election for {position}",
-                description="Use the dropdown below to vote. Votes are private.",
-                color=discord.Color.purple()
-            )
-
-            # List nominees as fields
-            for n in nominees:
-                embed.add_field(
-                    name=n["display_name"],
-                    value=f"<@{n['user_id']}>",
-                    inline=False
-                )
-
-            # -----------------------------
-            # Post the election panel to the elections channel
-            # ----------------------------
-            elections_channel = interaction.guild.get_channel(elections_channel_id)
-            if not elections_channel:
-                await interaction.response.send_message(
-                    "❌ The configured elections channel was not found. "
-                    "An administrator can run the /setup command to fix this.",
-                    ephemeral=True
-                )
-                return
-            
-            view = VoteView(self.bot, guild_id, position, nominees, settings)
-            await elections_channel.send(embed=embed, view=view)
-
-            # -----------------------------
-            # Confirm privately to the nominator
-            # ----------------------------
+    @app_commands.command(name="nominate", description="Nominate yourself for a government position")
+    @app_commands.describe(
+        position="The position you are running for (e.g., Prime Minister)",
+        name="Your name as it displays on the ballot"
+    )
+    async def nominate(self, interaction: Interaction, position: str, name: str):
+        # -----------------------------
+        # Must be used in a server
+        # -----------------------------
+        if not interaction.guild:
             await interaction.response.send_message(
-                f"✅ You have successfully nominated yourself for **{position}**. "
-                "An election panel has been posted in the elections channel.",
+                "❌ This command can only be used in a server.",
                 ephemeral=True
             )
+            return
+
+        guild_id = interaction.guild.id
+
+        # -----------------------------
+        # Ensure the bot has been configured
+        # -----------------------------
+        settings = get_settings(self.bot.db, guild_id)
+        if not settings:
+            await interaction.response.send_message(
+                "❌ The Borealia Government bot is not yet configured for this server. "
+                "An administrator can run the /setup command to configure it.",
+                ephemeral=True
+            )
+            return
+
+        elections_channel_id = settings.get("elections_channel_id")
+        if not elections_channel_id:
+            await interaction.response.send_message(
+                "❌ The Borealia Government bot is not properly configured. "
+                "The elections channel is missing. An administrator can run the /setup command to fix this.",
+                ephemeral=True
+            )
+            return
+
+        # -----------------------------
+        # Ensure election exists; prevent nomination if closed
+        # -----------------------------
+        ensure_election_row(self.bot.db, guild_id, position)
+
+        if election_is_closed(self.bot.db, guild_id, position):
+            await interaction.response.send_message(
+                f"❌ The election for **{position}** is now closed. You cannot nominate yourself.",
+                ephemeral=True
+            )
+            return
+
+        # -----------------------------
+        # Insert the nomination
+        # -----------------------------
+        inserted = add_nomination(self.bot.db, guild_id, position, interaction.user.id, name)
+
+        if not inserted:
+            await interaction.response.send_message(
+                f"❌ You have already nominated yourself for **{position}**.",
+                ephemeral=True
+            )
+            return
+
+        # -----------------------------
+        # Build the election panel embed
+        # -----------------------------
+        nominees = get_nominees(self.bot.db, guild_id, position)
+
+        embed = discord.Embed(
+            title=f"🗳️ Election for {position}",
+            description="Use the dropdown below to vote. Votes are private.",
+            color=discord.Color.purple()
+        )
+
+        for n in nominees:
+            embed.add_field(
+                name=n["display_name"],
+                value=f"<@{n['user_id']}>",
+                inline=False
+            )
+
+        # -----------------------------
+        # Post the election panel to the elections channel
+        # -----------------------------
+        elections_channel = interaction.guild.get_channel(int(elections_channel_id))
+        if not elections_channel:
+            await interaction.response.send_message(
+                "❌ The configured elections channel was not found. "
+                "An administrator can run the /setup command to fix this.",
+                ephemeral=True
+            )
+            return
+
+        view = VoteView(self.bot, guild_id, position, nominees, settings)
+        await elections_channel.send(embed=embed, view=view)
+
+        # -----------------------------
+        # Confirm privately to the nominator
+        # -----------------------------
+        await interaction.response.send_message(
+            f"✅ You have successfully nominated yourself for **{position}**. "
+            "An election panel has been posted in the elections channel.",
+            ephemeral=True
+        )
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(NominateCommand(bot))

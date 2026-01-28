@@ -56,18 +56,18 @@ def init_db(conn: sqlite3.Connection) -> None:
     # Stores configuration by /setup for each server.
     # ------------------------------------------------------------
     cur.execute("""
-        CREATE TABLE IF NOT EXISTS guild_settings (
-            guild_id              INTEGER PRIMARY KEY,
-            
-            -- Channels
-            elections_channel_id  INTEGER,
-            logs_channel_id       INTEGER,
-            
-            -- Roles
-            admin_role_id         INTEGER,
-            voter_role_id         INTEGER
-        )
-    """)
+    CREATE TABLE IF NOT EXISTS guild_settings (
+    guild_id INTEGER PRIMARY KEY,
+
+    nominees_channel_id INTEGER,
+    elections_channel_id INTEGER,
+    laws_channel_id INTEGER,
+    log_channel_id INTEGER,
+
+    voter_role_id INTEGER,
+    admin_role_id INTEGER
+)
+""")
 
     # ------------------------------------------------------------
     # 2) Elections

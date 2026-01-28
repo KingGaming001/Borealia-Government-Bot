@@ -1,0 +1,17 @@
+import sqlite3
+import config
+
+conn = sqlite3.connect(config.DATABASE_PATH)
+cur = conn.cursor()
+
+cur.execute("PRAGMA table_info(guild_settings)")
+cols = cur.fetchall()
+
+print("DATABASE_PATH:", config.DATABASE_PATH)
+print("guild_settings columns:")
+
+for c in cols:
+    # c format: (cid, name, type, notnull, dflt_value, pk)
+    print("-", c[1], c[2])
+
+conn.close()
