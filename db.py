@@ -76,10 +76,18 @@ def init_db(conn: sqlite3.Connection) -> None:
     # ------------------------------------------------------------
     cur.execute("""
         CREATE TABLE IF NOT EXISTS elections (
-            guild_id      INTEGER NOT NULL,
-            position      TEXT NOT NULL,
-            is_closed     INTEGER DEFAULT 0,
+            guild_id                INTEGER NOT NULL,
+            position                TEXT NOT NULL,
+            
+            status                  TEXT NOT NULL,
+            start_at                TEXT NOT NULL,
+            
+            nominee_message_id      INTEGER,
+            vote_message_id         INTEGER,
                 
+            created_by              INTEGER,
+            created_at              TEXT,
+            
             PRIMARY KEY (guild_id, position)
         )
     """)
@@ -110,6 +118,7 @@ def init_db(conn: sqlite3.Connection) -> None:
             guild_id      INTEGER NOT NULL,
             position      TEXT NOT NULL,
             voter_id      INTEGER NOT NULL,
+            candidate_id  INTEGER NOT NULL,
                 
             PRIMARY KEY (guild_id, position, voter_id)
         )
