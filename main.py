@@ -305,17 +305,20 @@ async def setup_hook():
         await bot.load_extension(f"commands.{module_name}")
         print(f"📦 Loaded command module: {module_name}")
 
-    guild = discord.Object(id=config.GUILD_ID)
+    # If TEST_GUILD_ID is set, do a fast guild sync for development.
+    # Otherwise, sync globally so the bot works in every server it joins.
+    if getattr(config, "TEST_GUILD_ID", None):
+        guild = discord.Object(id=config.TEST_GUILD_ID)
 
-    # 1) Clear guild commands on Discord (prevents duplicates)
-    bot.tree.clear_commands(guild=guild)
+        bot.tree.clear_commands(guild=guild)
+        bot.tree.copy_global_to(guild=guild)
 
-    # 2) Copy your global commands into the guild scope (so guild sync sees them)
-    bot.tree.copy_global_to(guild=guild)
+        synced = await bot.tree.sync(guild=guild)
+        print(f"🔁 Synced {len(synced)} slash commands to TEST guild {config.TEST_GUILD_ID}")
+    else:
+        synced = await bot.tree.sync()
+        print(f"🌐 Synced {len(synced)} slash commands globally (multi-server)")
 
-    # 3) Sync once
-    synced = await bot.tree.sync(guild=guild)
-    print(f"🔁 Synced {len(synced)} slash commands to guild {config.GUILD_ID}.")
 
 
 
