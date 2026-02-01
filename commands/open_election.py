@@ -45,7 +45,7 @@ def parse_start_time_to_utc(start_time_str: str) -> tuple[datetime, datetime]:
     s = start_time_str.strip().replace("T", " ")
 
     try:
-        naive = datetime.strptime(s, "%Y-%m-%d %H:%M")  # ✅ FIXED FORMAT
+        naive = datetime.strptime(s, "%Y-%m-%d %H:%M")
     except ValueError:
         raise ValueError("Invalid date/time format. Use `YYYY-MM-DD HH:MM` (e.g. `2026-02-01 19:30`).")
 

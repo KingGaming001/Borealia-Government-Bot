@@ -78,7 +78,8 @@ class StatusCommand(commands.Cog):
                 f"• **Nominees Channel:** {channel_mention(settings.get('nominees_channel_id'))}\n"
                 f"• **Elections Channel:** {channel_mention(settings.get('elections_channel_id'))}\n"
                 f"• **Laws Channel:** {channel_mention(settings.get('laws_channel_id'))}\n"
-                f"• **Log Channel:** {channel_mention(settings.get('log_channel_id'))}"
+                f"• **Log Channel:** {channel_mention(settings.get('log_channel_id'))}\n"
+                f"• **Parliament Channel:** {channel_mention(settings.get('parliametn_channel_id'))}"
             ),
             inline=False
         )
@@ -87,7 +88,8 @@ class StatusCommand(commands.Cog):
             name="Roles",
             value=(
                 f"• **Voter Role:** {role_mention(settings.get('voter_role_id'))}\n"
-                f"• **Admin Role:** {role_mention(settings.get('admin_role_id'))}"
+                f"• **Admin Role:** {role_mention(settings.get('admin_role_id'))}\n"
+                f"• **Parliament Role:**{role_mention(settings.get('parliament_role_id'))}"
             ),
             inline=False
         )
@@ -98,8 +100,10 @@ class StatusCommand(commands.Cog):
             "nominees_channel_id",
             "elections_channel_id",
             "laws_channel_id",
+            "parliament_channel_id"
             "voter_role_id",
             "admin_role_id"
+            "parliament_role_id"
         ]:
             if not settings.get(key):
                 missing_fields.append(key.replace("_", " ").title())

@@ -31,6 +31,8 @@ def upsert_settings(
     log_channel_id: int | None = None,
     voter_role_id: int | None = None,
     admin_role_id: int | None = None,
+    parliament_channel_id: int | None = None,
+    parliament_role_id: int | None = None,
 ) -> None:
     """
     Insert or update guild settings.
@@ -53,6 +55,10 @@ def upsert_settings(
         fields["voter_role_id"] = voter_role_id
     if admin_role_id is not None:
         fields["admin_role_id"] = admin_role_id
+    if parliament_channel_id is not None:
+        fields["parliament_channel_id"] = parliament_channel_id
+    if parliament_role_id is not None:
+        fields["parliament_role_id"] = parliament_role_id
 
     # Nothing to update
     if not fields:
@@ -80,6 +86,18 @@ def has_voter_role(member: discord.Member, settings: dict | None) -> bool:
     if not voter_role_id:
         return False
     return any(r.id == int(voter_role_id) for r in member.roles)
+
+
+def has_parliament_role(member: discord.Member, settings: dict | None) -> bool:
+    """
+    True if member has the configured parliament role.
+    """
+    if not settings:
+        return False
+    parliament_role_id = settings.get("parliament_role_id")
+    if not parliament_role_id:
+        return False
+    return any(r.id == int(parliament_role_id) for r in member.roles)
 
 
 def is_admin(interaction: discord.Interaction, settings: dict | None) -> bool:

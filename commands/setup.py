@@ -8,6 +8,8 @@
 # - log channel (optional)
 # - voter role
 # - admin role
+# - parliament channel
+# - paraliament role
 #
 # Only discord administrators (or an already-configured admin role)
 # can run /setup
@@ -35,7 +37,9 @@ class SetupCommand(commands.Cog):
         laws_channel="Channel where proposed laws are posted",
         log_channel="Staff log channel (optional)",
         voter_role="Role required to vote (e.g. Citizen)",
-        admin_role="Role allowed to run admin commands (e.g., King)"
+        admin_role="Role allowed to run admin commands (e.g., King)",
+        parliament_channel="Channel where Parliament motions & roll-call votes are posted (optional)",
+        parliament_role="Role required to vote on motions (optional)",
     )
     async def setup(
         self,
@@ -46,6 +50,8 @@ class SetupCommand(commands.Cog):
         voter_role: discord.Role,
         admin_role: discord.Role,
         log_channel: discord.TextChannel | None = None,  # ✅ optional param should have a default
+        parliament_channel: discord.TextChannel | None = None,
+        parliament_role: discord.Role | None = None,
     ):
         # -----------------------------
         # Must be used in a server
@@ -81,7 +87,10 @@ class SetupCommand(commands.Cog):
             laws_channel_id=laws_channel.id,
             log_channel_id=log_channel.id if log_channel else None,
             voter_role_id=voter_role.id,  # REQUIRED
-            admin_role_id=admin_role.id   # REQUIRED
+            admin_role_id=admin_role.id,   # REQUIRED
+            parliament_channel_id=parliament_channel.id if parliament_channel else None,
+            parliament_role_id=parliament_role.id if parliament_role else None,
+
         )
 
         # -----------------------------

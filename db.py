@@ -124,5 +124,50 @@ def init_db(conn: sqlite3.Connection) -> None:
         )
     """)
 
+    # ------------------------------------------------------------
+    # 5) Motions (Parliament Votes)
+    # Motions are things like:
+    # - Acts of Parliament
+    # - Resolutions
+    # - Confidence Votes
+    # 
+    # Each motion has a lifecycle:
+    # DRAFT -> VOTING -> CLOSED
+    # ------------------------------------------------------------
+    cur.execute("""
+                CREATE TABLE IF NOT EXISTS motion (
+                motion_id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id                INTEGER NOT NULL,
+                
+                kind                    TEXT NOT NULL,          -- "act", "resolution", etc.
+                title                   TEXT NOT NULL,
+                text                    TEXT NOT NULL,
+                
+                status                  TEXT NOT NULL,          -- DRAFT | VOTING | CLOSED
+                opens_at                TEXT,
+                closes_at               TEXT,
+                
+                public_votes            INTEGER DEFAULT 1,      -- 1 = roll-call visible
+                
+                -- Where the public roll-call message is posted
+                message_channel_id      INTEGER,
+                message_id              INTEGER
+                )
+            """)
+    
+    # ------------------------------------------------------------
+    # 7) Migration: add Parliament fields to guild_settings (if missing)
+    # SQLite cannot "ADD COLUMN IF NOT EXISTS", so we try and ignore errors.
+    # ------------------------------------------------------------
+    try:
+        cur.execute("ALTER TABLE guild_settings ADD COLUMN parliament_channel_id INTEGER")
+    except sqlite3.OperationalError:
+        pass
+
+    try: 
+        cur.execute("ALTER TABLE guild_settings ADD COLUMN parliament_role_id INTEGER")
+    except sqlite3.OperationalError:
+        pass
+
     # Save table creation tables
     conn.commit()
