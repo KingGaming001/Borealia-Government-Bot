@@ -7,14 +7,13 @@
 # - Create bot + intents
 # - Initialise database
 # - Load all command modules
-# - Sync slash commands to your test guild (fast)
+# - Sync slash commands (single scope to avoid duplicates)
 # - Run election scheduler:
 #     SCHEDULED -> VOTING when start_at is reached
 #     Posts voting dropdown in elections channel
 #
 # Updates included:
-# 1) Prevent duplicate slash commands (/status appearing multiple times):
-#    - Clear guild commands + sync (no copy_global_to)
+# 1) Prevent duplicate slash commands (/status appearing multiple times)
 # 2) Lock votes:
 #    - Once a voter votes, they cannot change their vote
 # ============================================================
@@ -305,19 +304,16 @@ async def setup_hook():
         await bot.load_extension(f"commands.{module_name}")
         print(f"📦 Loaded command module: {module_name}")
 
-    # If TEST_GUILD_ID is set, do a fast guild sync for development.
-    # Otherwise, sync globally so the bot works in every server it joins.
+    # Use a single command scope (global) to avoid duplicate entries in guilds.
+    # If a test guild had previously been used, clear its guild-specific command set.
     if getattr(config, "TEST_GUILD_ID", None):
         guild = discord.Object(id=config.TEST_GUILD_ID)
-
         bot.tree.clear_commands(guild=guild)
-        bot.tree.copy_global_to(guild=guild)
+        await bot.tree.sync(guild=guild)
+        print(f"🧹 Cleared guild-specific commands in TEST guild {config.TEST_GUILD_ID}")
 
-        synced = await bot.tree.sync(guild=guild)
-        print(f"🔁 Synced {len(synced)} slash commands to TEST guild {config.TEST_GUILD_ID}")
-    else:
-        synced = await bot.tree.sync()
-        print(f"🌐 Synced {len(synced)} slash commands globally (multi-server)")
+    synced = await bot.tree.sync()
+    print(f"🌐 Synced {len(synced)} slash commands globally")
 
 
 

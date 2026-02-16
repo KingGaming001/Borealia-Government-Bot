@@ -65,7 +65,8 @@ def init_db(conn: sqlite3.Connection) -> None:
     log_channel_id INTEGER,
 
     voter_role_id INTEGER,
-    admin_role_id INTEGER
+    admin_role_id INTEGER,
+    king_role_id INTEGER
 )
 """)
 
@@ -135,28 +136,83 @@ def init_db(conn: sqlite3.Connection) -> None:
     # DRAFT -> VOTING -> CLOSED
     # ------------------------------------------------------------
     cur.execute("""
-                CREATE TABLE IF NOT EXISTS motion (
+                CREATE TABLE IF NOT EXISTS motions (
                 motion_id               INTEGER PRIMARY KEY AUTOINCREMENT,
                 guild_id                INTEGER NOT NULL,
                 
                 kind                    TEXT NOT NULL,          -- "act", "resolution", etc.
                 title                   TEXT NOT NULL,
                 text                    TEXT NOT NULL,
-                
+
+                created_by              INTEGER NOT NULL,
+                created_at              TEXT NOT NULL,
+
                 status                  TEXT NOT NULL,          -- DRAFT | VOTING | CLOSED
                 opens_at                TEXT,
                 closes_at               TEXT,
                 
                 public_votes            INTEGER DEFAULT 1,      -- 1 = roll-call visible
+
+                -- Final outcome and royal assent workflow
+                final_result            TEXT,                   -- PASSED | FAILED | TIED
+                royal_assent_status     TEXT,                   -- PENDING | APPROVED | REJECTED
+                royal_assented_by       INTEGER,
+                royal_assented_at       TEXT,
+                assent_channel_id       INTEGER,
+                assent_message_id       INTEGER,
+                target_act_id           INTEGER,
                 
                 -- Where the public roll-call message is posted
                 message_channel_id      INTEGER,
                 message_id              INTEGER
                 )
             """)
+
+    # ------------------------------------------------------------
+    # 7) Acts Registry
+    # Stores enacted acts and their repeal status.
+    # ------------------------------------------------------------
+    cur.execute("""
+                CREATE TABLE IF NOT EXISTS acts (
+                act_id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id                 INTEGER NOT NULL,
+
+                source_motion_id         INTEGER,
+                title                    TEXT NOT NULL,
+                text                     TEXT NOT NULL,
+
+                enacted_by_user_id       INTEGER,
+                enacted_at               TEXT NOT NULL,
+
+                status                   TEXT NOT NULL DEFAULT 'ENACTED', -- ENACTED | REPEALED
+                repealed_by_motion_id    INTEGER,
+                repealed_by_user_id      INTEGER,
+                repealed_at              TEXT
+                )
+            """)
     
     # ------------------------------------------------------------
-    # 7) Migration: add Parliament fields to guild_settings (if missing)
+    # 6) Motion Votes
+    # Stores votes for each motion.
+    # One row per (guild_id, motion_id, user_id) to enforce:
+    #   "one vote per user per motion"
+    # ------------------------------------------------------------
+    cur.execute("""
+                CREATE TABLE IF NOT EXISTS motion_votes (
+                vote_id        INTEGER PRIMARY KEY AUTOINCREMENT,
+
+                guild_id       INTEGER NOT NULL,
+                motion_id      INTEGER NOT NULL,
+                user_id        INTEGER NOT NULL,
+
+                choice         TEXT NOT NULL,       -- "yes", "no", "abstain"
+
+                UNIQUE (guild_id, motion_id, user_id)
+            )
+            """)  
+    
+    # ------------------------------------------------------------
+    # 8) Migration: add Parliament fields to guild_settings (if missing)
     # SQLite cannot "ADD COLUMN IF NOT EXISTS", so we try and ignore errors.
     # ------------------------------------------------------------
     try:
@@ -166,6 +222,80 @@ def init_db(conn: sqlite3.Connection) -> None:
 
     try: 
         cur.execute("ALTER TABLE guild_settings ADD COLUMN parliament_role_id INTEGER")
+    except sqlite3.OperationalError:
+        pass
+
+    try:
+        cur.execute("ALTER TABLE guild_settings ADD COLUMN king_role_id INTEGER")
+    except sqlite3.OperationalError:
+        pass
+
+    # ------------------------------------------------------------
+    # 9) Migration: legacy motion_votes.vote -> motion_votes.choice
+    # ------------------------------------------------------------
+    try:
+        cur.execute("PRAGMA table_info(motion_votes)")
+        motion_vote_columns = {row[1] for row in cur.fetchall()}
+
+        if "choice" not in motion_vote_columns and "vote" in motion_vote_columns:
+            cur.execute("ALTER TABLE motion_votes ADD COLUMN choice TEXT")
+            cur.execute("UPDATE motion_votes SET choice = vote WHERE choice IS NULL")
+    except sqlite3.OperationalError:
+        pass
+
+    # ------------------------------------------------------------
+    # 10) Migration: ensure legacy motions tables have all columns
+    # ------------------------------------------------------------
+    try:
+        cur.execute("PRAGMA table_info(motions)")
+        motions_columns = {row[1] for row in cur.fetchall()}
+
+        missing_motion_columns = [
+            ("created_by", "INTEGER"),
+            ("created_at", "TEXT"),
+            ("status", "TEXT DEFAULT 'DRAFT'"),
+            ("opens_at", "TEXT"),
+            ("closes_at", "TEXT"),
+            ("public_votes", "INTEGER DEFAULT 1"),
+            ("final_result", "TEXT"),
+            ("royal_assent_status", "TEXT"),
+            ("royal_assented_by", "INTEGER"),
+            ("royal_assented_at", "TEXT"),
+            ("assent_channel_id", "INTEGER"),
+            ("assent_message_id", "INTEGER"),
+            ("target_act_id", "INTEGER"),
+            ("message_channel_id", "INTEGER"),
+            ("message_id", "INTEGER"),
+        ]
+
+        for column_name, column_type in missing_motion_columns:
+            if column_name not in motions_columns:
+                cur.execute(f"ALTER TABLE motions ADD COLUMN {column_name} {column_type}")
+    except sqlite3.OperationalError:
+        pass
+
+    # ------------------------------------------------------------
+    # 11) Migration: ensure legacy acts tables have all columns
+    # ------------------------------------------------------------
+    try:
+        cur.execute("PRAGMA table_info(acts)")
+        acts_columns = {row[1] for row in cur.fetchall()}
+
+        missing_act_columns = [
+            ("source_motion_id", "INTEGER"),
+            ("title", "TEXT"),
+            ("text", "TEXT"),
+            ("enacted_by_user_id", "INTEGER"),
+            ("enacted_at", "TEXT"),
+            ("status", "TEXT DEFAULT 'ENACTED'"),
+            ("repealed_by_motion_id", "INTEGER"),
+            ("repealed_by_user_id", "INTEGER"),
+            ("repealed_at", "TEXT"),
+        ]
+
+        for column_name, column_type in missing_act_columns:
+            if column_name not in acts_columns:
+                cur.execute(f"ALTER TABLE acts ADD COLUMN {column_name} {column_type}")
     except sqlite3.OperationalError:
         pass
 
