@@ -48,7 +48,7 @@ Built with `discord.py` and SQLite.
 ### 1) Clone and enter project
 
 ```powershell
-cd "C:\Users\gflee\Documents\Borealia Government Bot"
+cd "C:\Users\YOURUSER\Documents\Borealia Government Bot"
 ```
 
 ### 2) Create virtual environment
