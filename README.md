@@ -43,12 +43,38 @@ Built with `discord.py` and SQLite.
 - `config_store.py` — guild settings + permission helpers
 - `commands/` — slash command modules
 
-## Setup
+## Create Your Own Discord Bot (Developer Portal)
+
+If you're making your own version of this bot, create your own Discord application and token first.
+
+1. Go to the Discord Developer Portal: <https://discord.com/developers/applications>
+2. Click **New Application**, choose a name, and create it.
+3. Open the **Bot** tab, then click **Add Bot**.
+4. Under **Privileged Gateway Intents**, enable:
+	- **Server Members Intent** (required for role-based checks)
+5. Click **Reset Token** (or **Copy**) and save the bot token.
+6. Open **OAuth2 → URL Generator** and select scopes:
+	- `bot`
+	- `applications.commands`
+7. In bot permissions, select what your server needs (for easiest setup, temporarily grant **Administrator**), then open the generated URL to invite the bot to your server.
+
+Minimum recommended bot permissions (if not using **Administrator**):
+
+- **View Channels**
+- **Send Messages**
+- **Embed Links**
+- **Read Message History**
+- **Use External Emojis** (optional)
+- **Manage Messages** (optional, if you want the bot to clean up old setup/status posts)
+
+After this, place your token in `.env` as `DISCORD_TOKEN`.
+
+## Local Project Setup
 
 ### 1) Clone and enter project
 
 ```powershell
-cd "C:\Users\gflee\Documents\Borealia Government Bot"
+cd "C:\Users\YOURUSER\Documents\Borealia Government Bot"
 ```
 
 ### 2) Create virtual environment
