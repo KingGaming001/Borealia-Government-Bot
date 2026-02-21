@@ -19,7 +19,7 @@ from discord.ext import commands
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
-from config_store import get_settings
+from config_store import get_settings, is_admin
 
 LONDON_TZ = ZoneInfo("Europe/London")
 
@@ -64,6 +64,51 @@ def build_nominees_embed(position: str, start_at_iso_utc: str | None, nominees: 
         )
 
     return embed
+
+
+async def refresh_nominees_message(
+    bot: commands.Bot,
+    nominees_channel: discord.TextChannel,
+    guild_id: int,
+    position: str,
+    start_at_iso_utc: str | None,
+    nominee_message_id: int | None,
+) -> None:
+    """
+    Rebuild and post/edit the nominees message for a position.
+    """
+    cur = bot.db.cursor()
+    cur.execute(
+        """
+        SELECT user_id, display_name
+        FROM nominations
+        WHERE guild_id = ? AND position = ?
+        ORDER BY display_name ASC
+        """,
+        (guild_id, position)
+    )
+    nominees_rows = cur.fetchall()
+    nominees = [{"user_id": int(r["user_id"]), "display_name": str(r["display_name"])} for r in nominees_rows]
+
+    embed = build_nominees_embed(position, start_at_iso_utc, nominees)
+
+    msg_obj = None
+    if nominee_message_id:
+        try:
+            msg_obj = await nominees_channel.fetch_message(int(nominee_message_id))
+        except Exception:
+            msg_obj = None
+
+    if msg_obj:
+        await msg_obj.edit(embed=embed)
+        return
+
+    sent = await nominees_channel.send(embed=embed)
+    cur.execute(
+        "UPDATE elections SET nominee_message_id = ? WHERE guild_id = ? AND position = ?",
+        (sent.id, guild_id, position)
+    )
+    bot.db.commit()
 
 
 class PositionSelect(discord.ui.Select):
@@ -159,40 +204,15 @@ class PositionSelect(discord.ui.Select):
         )
         self.bot.db.commit()
 
-        # Fetch updated nominees list
-        cur.execute(
-            """
-            SELECT user_id, display_name
-            FROM nominations
-            WHERE guild_id = ? AND position = ?
-            ORDER BY display_name ASC
-            """,
-            (self.guild_id, position)
-        )
-        nominees_rows = cur.fetchall()
-        nominees = [{"user_id": int(r["user_id"]), "display_name": str(r["display_name"])} for r in nominees_rows]
-
         # Update nominees message in nominees channel
-        start_at_iso = election["start_at"]
-        embed = build_nominees_embed(position, start_at_iso, nominees)
-
-        nominee_message_id = election["nominee_message_id"]
-        msg_obj = None
-        if nominee_message_id:
-            try:
-                msg_obj = await self.nominees_channel.fetch_message(int(nominee_message_id))
-            except Exception:
-                msg_obj = None
-
-        if msg_obj:
-            await msg_obj.edit(embed=embed)
-        else:
-            sent = await self.nominees_channel.send(embed=embed)
-            cur.execute(
-                "UPDATE elections SET nominee_message_id = ? WHERE guild_id = ? AND position = ?",
-                (sent.id, self.guild_id, position)
-            )
-            self.bot.db.commit()
+        await refresh_nominees_message(
+            bot=self.bot,
+            nominees_channel=self.nominees_channel,
+            guild_id=self.guild_id,
+            position=position,
+            start_at_iso_utc=election["start_at"],
+            nominee_message_id=election["nominee_message_id"],
+        )
 
         # Acknowledge the dropdown interaction by editing the ephemeral message
         await interaction.response.edit_message(
@@ -200,7 +220,6 @@ class PositionSelect(discord.ui.Select):
                     f"Nominees list updated in {self.nominees_channel.mention}.",
             view=None
         )
-
 
 class NominateView(discord.ui.View):
     def __init__(
@@ -214,7 +233,6 @@ class NominateView(discord.ui.View):
     ):
         super().__init__(timeout=120)
         self.add_item(PositionSelect(bot, guild_id, user_id, ballot_name, elections, nominees_channel))
-
 
 class NominateCommand(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -307,6 +325,109 @@ class NominateCommand(commands.Cog):
         embed.add_field(name="Ballot Name", value=name, inline=False)
 
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+    @app_commands.command(
+        name="remove_nominee",
+        description="Admin: remove a candidate from nominations for a position"
+    )
+    @app_commands.describe(
+        position="The election position (e.g., Prime Minister)",
+        candidate="The member to remove from nominees"
+    )
+    async def remove_nominee(self, interaction: Interaction, position: str, candidate: discord.Member):
+        if not interaction.guild:
+            await interaction.response.send_message("❌ This command can only be used in a server.", ephemeral=True)
+            return
+
+        guild_id = interaction.guild.id
+
+        settings = get_settings(self.bot.db, guild_id)
+        if not settings:
+            await interaction.response.send_message("❌ Bot not configured. Ask an admin to run **/setup**.", ephemeral=True)
+            return
+
+        if not is_admin(interaction, settings):
+            await interaction.response.send_message("❌ You do not have permission to use this command.", ephemeral=True)
+            return
+
+        nominees_channel_id = settings.get("nominees_channel_id")
+        if not nominees_channel_id:
+            await interaction.response.send_message(
+                "❌ Nominees channel not configured. Ask an admin to run **/setup**.",
+                ephemeral=True
+            )
+            return
+
+        nominees_channel = interaction.guild.get_channel(int(nominees_channel_id))
+        if not nominees_channel or not isinstance(nominees_channel, discord.TextChannel):
+            await interaction.response.send_message("❌ Configured nominees channel not found.", ephemeral=True)
+            return
+
+        cur = self.bot.db.cursor()
+        cur.execute(
+            "SELECT status, start_at, nominee_message_id FROM elections WHERE guild_id = ? AND position = ?",
+            (guild_id, position)
+        )
+        election = cur.fetchone()
+
+        if not election:
+            await interaction.response.send_message(f"❌ No election found for **{position}**.", ephemeral=True)
+            return
+
+        if election["status"] != "SCHEDULED":
+            await interaction.response.send_message(
+                "❌ Candidates can only be removed while nominations are open (SCHEDULED).",
+                ephemeral=True
+            )
+            return
+
+        now_utc = datetime.now(timezone.utc)
+        try:
+            start_at = datetime.fromisoformat(election["start_at"])
+            if start_at.tzinfo is None:
+                start_at = start_at.replace(tzinfo=timezone.utc)
+            start_at_utc = start_at.astimezone(timezone.utc)
+        except Exception:
+            await interaction.response.send_message(
+                "❌ Election start time is invalid. Ask an admin to reschedule.",
+                ephemeral=True
+            )
+            return
+
+        if start_at_utc <= now_utc:
+            await interaction.response.send_message(
+                "❌ Voting has already started (or is starting now). Nominations are closed.",
+                ephemeral=True
+            )
+            return
+
+        cur.execute(
+            "DELETE FROM nominations WHERE guild_id = ? AND position = ? AND user_id = ?",
+            (guild_id, position, candidate.id)
+        )
+
+        if cur.rowcount == 0:
+            await interaction.response.send_message(
+                f"ℹ️ {candidate.mention} is not currently nominated for **{position}**.",
+                ephemeral=True
+            )
+            return
+
+        self.bot.db.commit()
+
+        await refresh_nominees_message(
+            bot=self.bot,
+            nominees_channel=nominees_channel,
+            guild_id=guild_id,
+            position=position,
+            start_at_iso_utc=election["start_at"],
+            nominee_message_id=election["nominee_message_id"],
+        )
+
+        await interaction.response.send_message(
+            f"✅ Removed {candidate.mention} from nominees for **{position}**.",
+            ephemeral=True
+        )
 
 
 async def setup(bot: commands.Bot):

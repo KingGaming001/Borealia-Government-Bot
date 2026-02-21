@@ -190,6 +190,21 @@ Behavior:
 - Upserts your nomination for selected position
 - Updates/creates nominees embed in nominees channel
 
+#### `/remove_nominee`
+Remove a candidate from nominees for a position.
+
+Parameters:
+
+- `position` — office name (example: `Prime Minister`)
+- `candidate` — member to remove from nominees
+
+Behavior:
+
+- Only available to admins
+- Works only while nominations are open (`SCHEDULED` and before vote start)
+- Removes nominee record for that position
+- Updates nominees embed in nominees channel
+
 #### `/close_election`
 Close an election early (or close a scheduled one before start).
 
