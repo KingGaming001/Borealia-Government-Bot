@@ -124,6 +124,25 @@ Run `/setup` (server admins or configured admin role only):
 
 Use `/status` to inspect saved configuration.
 
+### Troubleshooting: "Missing Permissions" (403)
+
+If commands like `/open_election` fail with `403 Forbidden (50013): Missing Permissions`, the bot can see the server but cannot post in one or more configured channels.
+
+Check channel-level permissions for the bot role (or bot user) in channels set by `/setup`, especially:
+
+- `nominees_channel`
+- `elections_channel`
+- `laws_channel`
+- Optional: `log_channel`, `parliament_channel`
+
+Required permissions in those channels:
+
+- **View Channel**
+- **Send Messages**
+- **Embed Links**
+
+If it worked in one server but not another, this is almost always due to different role/category/channel overrides.
+
 ## Command Reference
 
 ### Configuration

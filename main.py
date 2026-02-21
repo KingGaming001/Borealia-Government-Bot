@@ -53,7 +53,6 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 bot.db = get_db()
 init_db(bot.db)
 
-
 # ============================================================
 # Voting UI (created ONLY when an election enters VOTING)
 # ============================================================
@@ -154,7 +153,6 @@ class VoteSelect(discord.ui.Select):
             ephemeral=True
         )
 
-
 class VoteView(discord.ui.View):
     def __init__(
         self,
@@ -166,7 +164,6 @@ class VoteView(discord.ui.View):
     ):
         super().__init__(timeout=None)
         self.add_item(VoteSelect(bot, guild_id, position, candidates, settings))
-
 
 # ============================================================
 # Election scheduler (SCHEDULED -> VOTING)
@@ -281,11 +278,9 @@ async def election_scheduler():
 
         print(f"✅ Election started: {guild.name} | {position} | message_id={sent.id}")
 
-
 @election_scheduler.before_loop
 async def before_election_scheduler():
     await bot.wait_until_ready()
-
 
 # ============================================================
 # Load extensions + sync slash commands
@@ -315,9 +310,6 @@ async def setup_hook():
     synced = await bot.tree.sync()
     print(f"🌐 Synced {len(synced)} slash commands globally")
 
-
-
-
 @bot.event
 async def on_ready():
     print("========================================")
@@ -329,7 +321,6 @@ async def on_ready():
     if not election_scheduler.is_running():
         election_scheduler.start()
         print("⏱️ Election scheduler started (checks every 30s).")
-
 
 if __name__ == "__main__":
     print("🚀 Starting Borealia Government Bot...")
