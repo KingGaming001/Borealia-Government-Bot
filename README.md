@@ -120,6 +120,7 @@ Run `/setup` (server admins or configured admin role only):
 - Optional: `log_channel`
 - Optional: `parliament_channel`
 - Optional: `parliament_role`
+- Optional: `associate_parliamentarian_role`
 - Optional: `king_role`
 
 Use `/status` to inspect saved configuration.
@@ -318,6 +319,7 @@ Behavior:
 - **Configured admin role** (from `/setup`) also has admin access.
 - **Configured voter role** can vote in elections.
 - **Configured parliament role** can vote on motions.
+- **Configured associate parliamentarian role** can nominate themselves for elections (but cannot vote on motions).
 - **Configured king role** can grant or reject Royal Assent on passed motions.
 
 ## Database

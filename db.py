@@ -66,6 +66,7 @@ def init_db(conn: sqlite3.Connection) -> None:
 
     voter_role_id INTEGER,
     admin_role_id INTEGER,
+    associate_parliamentarian_role_id INTEGER,
     king_role_id INTEGER
 )
 """)
@@ -222,6 +223,11 @@ def init_db(conn: sqlite3.Connection) -> None:
 
     try: 
         cur.execute("ALTER TABLE guild_settings ADD COLUMN parliament_role_id INTEGER")
+    except sqlite3.OperationalError:
+        pass
+
+    try:
+        cur.execute("ALTER TABLE guild_settings ADD COLUMN associate_parliamentarian_role_id INTEGER")
     except sqlite3.OperationalError:
         pass
 

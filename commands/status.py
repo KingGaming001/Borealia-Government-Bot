@@ -89,7 +89,8 @@ class StatusCommand(commands.Cog):
             value=(
                 f"• **Voter Role:** {role_mention(settings.get('voter_role_id'))}\n"
                 f"• **Admin Role:** {role_mention(settings.get('admin_role_id'))}\n"
-                f"• **Parliament Role:**{role_mention(settings.get('parliament_role_id'))}"
+                f"• **Parliament Role:**{role_mention(settings.get('parliament_role_id'))}\n"
+                f"• **Associate Parliamentarian Role:** {role_mention(settings.get('associate_parliamentarian_role_id'))}"
             ),
             inline=False
         )

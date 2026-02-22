@@ -33,6 +33,7 @@ def upsert_settings(
     admin_role_id: int | None = None,
     parliament_channel_id: int | None = None,
     parliament_role_id: int | None = None,
+    associate_parliamentarian_role_id: int | None = None,
     king_role_id: int | None = None,
 ) -> None:
     """
@@ -60,6 +61,8 @@ def upsert_settings(
         fields["parliament_channel_id"] = parliament_channel_id
     if parliament_role_id is not None:
         fields["parliament_role_id"] = parliament_role_id
+    if associate_parliamentarian_role_id is not None:
+        fields["associate_parliamentarian_role_id"] = associate_parliamentarian_role_id
     if king_role_id is not None:
         fields["king_role_id"] = king_role_id
 
@@ -101,6 +104,18 @@ def has_parliament_role(member: discord.Member, settings: dict | None) -> bool:
     if not parliament_role_id:
         return False
     return any(r.id == int(parliament_role_id) for r in member.roles)
+
+
+def has_associate_parliamentarian_role(member: discord.Member, settings: dict | None) -> bool:
+    """
+    True if member has the configured associate parliamentarian role.
+    """
+    if not settings:
+        return False
+    associate_role_id = settings.get("associate_parliamentarian_role_id")
+    if not associate_role_id:
+        return False
+    return any(r.id == int(associate_role_id) for r in member.roles)
 
 
 def has_king_role(member: discord.Member, settings: dict | None) -> bool:

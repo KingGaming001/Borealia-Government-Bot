@@ -19,10 +19,14 @@ from discord.ext import commands
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
-from config_store import get_settings, is_admin
+from config_store import (
+    get_settings,
+    has_associate_parliamentarian_role,
+    is_admin,
+    has_parliament_role,
+)
 
 LONDON_TZ = ZoneInfo("Europe/London")
-
 
 def utc_iso_to_london_str(iso_utc: str) -> str:
     """
@@ -33,7 +37,6 @@ def utc_iso_to_london_str(iso_utc: str) -> str:
         dt = dt.replace(tzinfo=timezone.utc)
     local = dt.astimezone(LONDON_TZ)
     return local.strftime("%d %b %Y, %H:%M") + " (Europe/London)"
-
 
 def build_nominees_embed(position: str, start_at_iso_utc: str | None, nominees: list[dict]) -> discord.Embed:
     """
@@ -64,7 +67,6 @@ def build_nominees_embed(position: str, start_at_iso_utc: str | None, nominees: 
         )
 
     return embed
-
 
 async def refresh_nominees_message(
     bot: commands.Bot,
@@ -109,7 +111,6 @@ async def refresh_nominees_message(
         (sent.id, guild_id, position)
     )
     bot.db.commit()
-
 
 class PositionSelect(discord.ui.Select):
     """
@@ -254,6 +255,21 @@ class NominateCommand(commands.Cog):
         if not settings:
             await interaction.response.send_message("❌ Bot not configured. Ask an admin to run **/setup**.", ephemeral=True)
             return
+
+        parliament_role_configured = bool(settings.get("parliament_role_id"))
+        associate_role_configured = bool(settings.get("associate_parliamentarian_role_id"))
+        if parliament_role_configured or associate_role_configured:
+            allowed_to_nominate = (
+                interaction.user.guild_permissions.administrator
+                or has_parliament_role(interaction.user, settings)
+                or has_associate_parliamentarian_role(interaction.user, settings)
+            )
+            if not allowed_to_nominate:
+                await interaction.response.send_message(
+                    "❌ You must have the configured Parliament role or Associate Parliamentarian role to nominate.",
+                    ephemeral=True,
+                )
+                return
 
         nominees_channel_id = settings.get("nominees_channel_id")
         if not nominees_channel_id:
@@ -428,7 +444,6 @@ class NominateCommand(commands.Cog):
             f"✅ Removed {candidate.mention} from nominees for **{position}**.",
             ephemeral=True
         )
-
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(NominateCommand(bot))

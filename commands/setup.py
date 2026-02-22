@@ -40,6 +40,7 @@ class SetupCommand(commands.Cog):
         admin_role="Role allowed to run admin commands (e.g., King)",
         parliament_channel="Channel where Parliament motions & roll-call votes are posted (optional)",
         parliament_role="Role required to vote on motions (optional)",
+        associate_parliamentarian_role="Role allowed to nominate but not vote on motions (optional)",
         king_role="Role allowed to grant Royal Assent (optional)",
     )
     async def setup(
@@ -53,6 +54,7 @@ class SetupCommand(commands.Cog):
         log_channel: discord.TextChannel | None = None,  # ✅ optional param should have a default
         parliament_channel: discord.TextChannel | None = None,
         parliament_role: discord.Role | None = None,
+        associate_parliamentarian_role: discord.Role | None = None,
         king_role: discord.Role | None = None,
     ):
         # -----------------------------
@@ -92,6 +94,7 @@ class SetupCommand(commands.Cog):
             admin_role_id=admin_role.id,   # REQUIRED
             parliament_channel_id=parliament_channel.id if parliament_channel else None,
             parliament_role_id=parliament_role.id if parliament_role else None,
+            associate_parliamentarian_role_id=associate_parliamentarian_role.id if associate_parliamentarian_role else None,
             king_role_id=king_role.id if king_role else None,
 
         )
@@ -113,6 +116,7 @@ class SetupCommand(commands.Cog):
                 f"• **Log Channel:** {log_channel.mention if log_channel else 'Not Set'}\n"
                 f"• **Voter Role:** {voter_role.mention}\n"
                 f"• **Admin Role:** {admin_role.mention}\n"
+                f"• **Associate Parliamentarian Role:** {associate_parliamentarian_role.mention if associate_parliamentarian_role else 'Not Set'}\n"
                 f"• **King Role:** {king_role.mention if king_role else 'Not Set'}\n"
             ),
             inline=False
