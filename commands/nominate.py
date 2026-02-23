@@ -22,6 +22,7 @@ from zoneinfo import ZoneInfo
 from config_store import (
     get_settings,
     has_associate_parliamentarian_role,
+    has_king_role,
     is_admin,
     has_parliament_role,
 )
@@ -344,7 +345,7 @@ class NominateCommand(commands.Cog):
 
     @app_commands.command(
         name="remove_nominee",
-        description="Admin: remove a candidate from nominations for a position"
+        description="Admin/King: remove a candidate from nominations for a position"
     )
     @app_commands.describe(
         position="The election position (e.g., Prime Minister)",
@@ -362,8 +363,15 @@ class NominateCommand(commands.Cog):
             await interaction.response.send_message("❌ Bot not configured. Ask an admin to run **/setup**.", ephemeral=True)
             return
 
-        if not is_admin(interaction, settings):
-            await interaction.response.send_message("❌ You do not have permission to use this command.", ephemeral=True)
+        can_remove = is_admin(interaction, settings) or (
+            isinstance(interaction.user, discord.Member)
+            and has_king_role(interaction.user, settings)
+        )
+        if not can_remove:
+            await interaction.response.send_message(
+                "❌ Only admins or members with the configured King role can use this command.",
+                ephemeral=True,
+            )
             return
 
         nominees_channel_id = settings.get("nominees_channel_id")

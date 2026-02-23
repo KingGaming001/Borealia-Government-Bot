@@ -206,7 +206,7 @@ Parameters:
 
 Behavior:
 
-- Only available to admins
+- Available to admins or members with the configured King role
 - Works only while nominations are open (`SCHEDULED` and before vote start)
 - Removes nominee record for that position
 - Updates nominees embed in nominees channel
