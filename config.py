@@ -2,6 +2,8 @@
 import os
 from dotenv import load_dotenv
 
+load_dotenv()
+
 # Discord bot token (loaded from .env file)
 TOKEN = os.getenv("DISCORD_TOKEN")
 
