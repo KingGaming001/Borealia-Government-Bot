@@ -43,6 +43,11 @@ Built with `discord.py` and SQLite.
 - `config_store.py` — guild settings + permission helpers
 - `commands/` — slash command modules
 
+## Legal
+
+- [Terms of Service](TERMS_OF_SERVICE.md)
+- [Privacy Policy](PRIVACY_POLICY.md)
+
 ## Create Your Own Discord Bot (Developer Portal)
 
 If you're making your own version of this bot, create your own Discord application and token first.
