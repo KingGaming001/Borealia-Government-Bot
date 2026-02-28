@@ -127,7 +127,13 @@ class CloseElectionCommand(commands.Cog):
         )
         vote_rows = cur.fetchall()
 
+        # First pass: count total votes
         total_votes = 0
+        for r in vote_rows:
+            v = int(r["votes"])
+            total_votes += v
+        
+        # Second pass: create results with vote share percentages
         results_lines: list[str] = []
         winner_id = None
         winner_votes = 0
@@ -135,16 +141,50 @@ class CloseElectionCommand(commands.Cog):
         for r in vote_rows:
             cid = int(r["candidate_id"])
             v = int(r["votes"])
-            total_votes += v
 
             display = name_by_id.get(cid, f"Unknown Candidate ({cid})")
-            results_lines.append(f"• **{display}** — {v} vote(s)")
+            
+            # Calculate vote share percentage
+            vote_share = (v / total_votes * 100) if total_votes > 0 else 0
+            results_lines.append(f"• **{display}** — {v} vote(s) ({vote_share:.1f}%)")
+            
             if winner_id is None:
                 winner_id = cid
                 winner_votes = v
 
         if not results_lines:
             results_lines.append("• *(No votes were recorded.)*")
+        
+        # --------------------------------
+        # Calculate voter turnout
+        # --------------------------------
+        # Get the voter role to count eligible voters
+        voter_role_id = settings.get("voter_role_id")
+        num_eligible_voters = 0
+        if voter_role_id:
+            try:
+                voter_role = interaction.guild.get_role(int(voter_role_id))
+                if voter_role:
+                    num_eligible_voters = len(voter_role.members)
+            except Exception:
+                # If role not found or error, just leave it as 0
+                pass
+        
+        # Count distinct voters
+        cur.execute(
+            """
+            SELECT COUNT(DISTINCT voter_id) as voter_count
+            FROM votes
+            WHERE guild_id = ? AND position = ?
+            """,
+            (guild_id, position)
+        )
+        voter_count_row = cur.fetchone()
+        num_voters = int(voter_count_row["voter_count"]) if voter_count_row else 0
+        
+        # Calculate turnout percentage
+        turnout_pct = (num_voters / num_eligible_voters * 100) if num_eligible_voters > 0 else 0
+        turnout_str = f"{num_voters}/{num_eligible_voters} ({turnout_pct:.1f}%)" if num_eligible_voters > 0 else f"{num_voters} (eligible voters unknown)"
 
         # Determine if tie for first place
         is_tie = False
@@ -231,6 +271,7 @@ class CloseElectionCommand(commands.Cog):
         dm_embed.add_field(name="Status when closed", value=current_status, inline=False)
         if start_at_iso:
             dm_embed.add_field(name="Scheduled vote start", value=utc_iso_to_london_str(start_at_iso), inline=False)
+        dm_embed.add_field(name="Voter Turnout", value=turnout_str, inline=False)
         dm_embed.add_field(name="Total votes recorded", value=str(total_votes), inline=False)
 
         dm_embed.add_field(

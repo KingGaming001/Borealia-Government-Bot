@@ -305,5 +305,30 @@ def init_db(conn: sqlite3.Connection) -> None:
     except sqlite3.OperationalError:
         pass
 
+    # ------------------------------------------------------------
+    # 12) Extended slowmode configuration
+    # Supports custom slowmode durations beyond Discord native 6h cap.
+    # ------------------------------------------------------------
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS extended_slowmode_channels (
+            guild_id       INTEGER NOT NULL,
+            channel_id     INTEGER NOT NULL,
+            delay_seconds  INTEGER NOT NULL,
+            enabled_by     INTEGER,
+            enabled_at     TEXT,
+            PRIMARY KEY (guild_id, channel_id)
+        )
+    """)
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS extended_slowmode_activity (
+            guild_id        INTEGER NOT NULL,
+            channel_id      INTEGER NOT NULL,
+            user_id         INTEGER NOT NULL,
+            last_message_at TEXT NOT NULL,
+            PRIMARY KEY (guild_id, channel_id, user_id)
+        )
+    """)
+
     # Save table creation tables
     conn.commit()
