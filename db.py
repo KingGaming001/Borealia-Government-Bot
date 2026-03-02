@@ -127,6 +127,38 @@ def init_db(conn: sqlite3.Connection) -> None:
     """)
 
     # ------------------------------------------------------------
+    # 4b) Appointment Nominations (no public vote)
+    # Used for PM/leadership appointments where nominations are
+    # collected but there is no voting phase.
+    # ------------------------------------------------------------
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS appointment_positions (
+            guild_id            INTEGER NOT NULL,
+            position            TEXT NOT NULL,
+            status              TEXT NOT NULL,          -- OPEN | CLOSED
+            nominee_message_id  INTEGER,
+            opened_by           INTEGER,
+            opened_at           TEXT,
+            nomination_closes_at TEXT,
+            closed_by           INTEGER,
+            closed_at           TEXT,
+
+            PRIMARY KEY (guild_id, position)
+        )
+    """)
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS appointment_nominations (
+            guild_id      INTEGER NOT NULL,
+            position      TEXT NOT NULL,
+            user_id       INTEGER NOT NULL,
+            display_name  TEXT NOT NULL,
+
+            PRIMARY KEY (guild_id, position, user_id)
+        )
+    """)
+
+    # ------------------------------------------------------------
     # 5) Motions (Parliament Votes)
     # Motions are things like:
     # - Acts of Parliament
@@ -233,6 +265,14 @@ def init_db(conn: sqlite3.Connection) -> None:
 
     try:
         cur.execute("ALTER TABLE guild_settings ADD COLUMN king_role_id INTEGER")
+    except sqlite3.OperationalError:
+        pass
+
+    # ------------------------------------------------------------
+    # 8b) Migration: add nomination_closes_at for appointment flows
+    # ------------------------------------------------------------
+    try:
+        cur.execute("ALTER TABLE appointment_positions ADD COLUMN nomination_closes_at TEXT")
     except sqlite3.OperationalError:
         pass
 

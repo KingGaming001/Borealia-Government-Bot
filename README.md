@@ -17,6 +17,10 @@ Built with `discord.py` and SQLite.
 	- Nominations open before vote start
 	- Automatic transition to `VOTING` at scheduled time
 	- Voter role enforcement + locked votes (no vote changes)
+- **Appointment nominations (no vote)**
+	- Open nominations for appointed offices (e.g., Secretary of State roles)
+	- Collect nominees in the nominees channel without creating voting UI
+	- Close nominations and DM shortlist privately to admin/PM staff
 - **Motion lifecycle**
 	- Draft, open, vote, close
 	- 24-hour fixed voting window once opened
@@ -184,7 +188,7 @@ Behavior:
 - Voting message is posted automatically at start time by the scheduler
 
 #### `/nominate`
-Nominate yourself for an available scheduled election.
+Nominate yourself for an available scheduled election or open appointment position.
 
 Parameter:
 
@@ -192,9 +196,50 @@ Parameter:
 
 Behavior:
 
-- Shows a dropdown of elections currently accepting nominations
+- Shows a dropdown of positions currently accepting nominations
 - Upserts your nomination for selected position
 - Updates/creates nominees embed in nominees channel
+
+#### `/open_appointment_nominations`
+Open nominations for an appointment position with **no public vote**.
+
+Parameters:
+
+- `position` — office name (example: `Secretary of State for Defence`)
+- `clear_nominees` (optional, default `false`) — clear previous appointment nominees
+- `duration_hours` (optional) — auto-close timer in hours (example: `24`, `72`)
+
+Behavior:
+
+- Opens an appointment nomination track (`OPEN`)
+- Updates/creates nominees embed in nominees channel
+- Does not schedule or create election voting UI
+- If `duration_hours` is provided, nominations auto-close when the timer expires
+
+#### `/close_appointment_nominations`
+Close appointment nominations and DM the shortlist privately.
+
+Parameter:
+
+- `position` — appointment office name
+
+Behavior:
+
+- Sets appointment nomination track to `CLOSED`
+- Updates nominees message to closed state
+- Sends a private nominees list to the command user by DM
+
+#### `/appointment_nominees`
+DM yourself the private nominee list for an appointment position.
+
+Parameter:
+
+- `position` — appointment office name
+
+Behavior:
+
+- Sends status + nominee shortlist by DM
+- Intended for private selection workflow (no voting)
 
 #### `/remove_nominee`
 Remove a candidate from nominees for a position.
@@ -207,7 +252,7 @@ Parameters:
 Behavior:
 
 - Available to admins or members with the configured King role
-- Works only while nominations are open (`SCHEDULED` and before vote start)
+- Works while election nominations are open (`SCHEDULED` and before vote start), or while appointment nominations are `OPEN`
 - Removes nominee record for that position
 - Updates nominees embed in nominees channel
 

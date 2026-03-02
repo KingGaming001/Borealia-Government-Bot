@@ -23,6 +23,7 @@ from __future__ import annotations
 import os
 import hashlib
 import traceback
+import importlib
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
@@ -651,7 +652,16 @@ async def setup_hook():
         if file.name.startswith("__"):
             continue
         module_name = file.stem
-        await bot.load_extension(f"commands.{module_name}")
+        module_path = f"commands.{module_name}"
+
+        # Only load true extension modules (must expose async setup(bot)).
+        lib = importlib.import_module(module_path)
+        setup_fn = getattr(lib, "setup", None)
+        if not callable(setup_fn):
+            print(f"⏭️ Skipped helper module (no setup): {module_name}")
+            continue
+
+        await bot.load_extension(module_path)
         print(f"📦 Loaded command module: {module_name}")
 
     # Use a single command scope (global) to avoid duplicate entries in guilds.
