@@ -23,7 +23,6 @@ from commands.appointment_nominations import (
 from config_store import (
     get_settings,
     has_associate_parliamentarian_role,
-    has_king_role,
     has_parliament_role,
     is_admin,
 )
@@ -345,16 +344,23 @@ class NominateCommand(commands.Cog):
 
     @app_commands.command(
         name="remove_nominee",
-        description="Admin/King: remove a candidate from election or appointment nominations",
+        description="Remove your own nomination, or remove anyone if you are an admin",
     )
     @app_commands.describe(
         position="The election position (e.g., Prime Minister)",
-        candidate="The member to remove from nominees",
+        candidate="Optional: member to remove (defaults to yourself; admins can remove anyone)",
     )
-    async def remove_nominee(self, interaction: Interaction, position: str, candidate: discord.Member):
+    async def remove_nominee(
+        self,
+        interaction: Interaction,
+        position: str,
+        candidate: discord.Member | None = None,
+    ):
         if not interaction.guild:
             await interaction.response.send_message("❌ This command can only be used in a server.", ephemeral=True)
             return
+
+        target = candidate or interaction.user
 
         guild_id = interaction.guild.id
         settings = get_settings(self.bot.db, guild_id)
@@ -362,12 +368,10 @@ class NominateCommand(commands.Cog):
             await interaction.response.send_message("❌ Bot not configured. Ask an admin to run **/setup**.", ephemeral=True)
             return
 
-        can_remove = is_admin(interaction, settings) or (
-            isinstance(interaction.user, discord.Member) and has_king_role(interaction.user, settings)
-        )
-        if not can_remove:
+        admin_can_remove_anyone = is_admin(interaction, settings)
+        if not admin_can_remove_anyone and interaction.user.id != target.id:
             await interaction.response.send_message(
-                "❌ Only admins or members with the configured King role can use this command.",
+                "❌ You can only remove your own nomination. Admins can remove anyone.",
                 ephemeral=True,
             )
             return
@@ -408,11 +412,11 @@ class NominateCommand(commands.Cog):
 
             cur.execute(
                 "DELETE FROM nominations WHERE guild_id = ? AND position = ? AND user_id = ?",
-                (guild_id, position, candidate.id),
+                (guild_id, position, target.id),
             )
             if cur.rowcount == 0:
                 await interaction.response.send_message(
-                    f"ℹ️ {candidate.mention} is not currently nominated for **{position}**.",
+                    f"ℹ️ {target.mention} is not currently nominated for **{position}**.",
                     ephemeral=True,
                 )
                 return
@@ -427,7 +431,7 @@ class NominateCommand(commands.Cog):
                 nominee_message_id=election["nominee_message_id"],
             )
             await interaction.response.send_message(
-                f"✅ Removed {candidate.mention} from nominees for **{position}**.",
+                f"✅ Removed {target.mention} from nominees for **{position}**.",
                 ephemeral=True,
             )
             return
@@ -437,11 +441,11 @@ class NominateCommand(commands.Cog):
             nominees_channel=nominees_channel,
             guild_id=guild_id,
             position=position,
-            candidate_id=candidate.id,
+            candidate_id=target.id,
         )
         if removed:
             await interaction.response.send_message(
-                f"✅ Removed {candidate.mention} from nominees for **{position}**.",
+                f"✅ Removed {target.mention} from nominees for **{position}**.",
                 ephemeral=True,
             )
             return
