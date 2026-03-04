@@ -78,8 +78,9 @@ class StatusCommand(commands.Cog):
                 f"• **Nominees Channel:** {channel_mention(settings.get('nominees_channel_id'))}\n"
                 f"• **Elections Channel:** {channel_mention(settings.get('elections_channel_id'))}\n"
                 f"• **Laws Channel:** {channel_mention(settings.get('laws_channel_id'))}\n"
+                f"• **Bank Transactions Channel:** {channel_mention(settings.get('bank_transactions_channel_id'))}\n"
                 f"• **Log Channel:** {channel_mention(settings.get('log_channel_id'))}\n"
-                f"• **Parliament Channel:** {channel_mention(settings.get('parliametn_channel_id'))}"
+                f"• **Parliament Channel:** {channel_mention(settings.get('parliament_channel_id'))}"
             ),
             inline=False
         )
@@ -101,10 +102,11 @@ class StatusCommand(commands.Cog):
             "nominees_channel_id",
             "elections_channel_id",
             "laws_channel_id",
-            "parliament_channel_id"
+            "bank_transactions_channel_id",
+            "parliament_channel_id",
             "voter_role_id",
-            "admin_role_id"
-            "parliament_role_id"
+            "admin_role_id",
+            "parliament_role_id",
         ]:
             if not settings.get(key):
                 missing_fields.append(key.replace("_", " ").title())

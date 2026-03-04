@@ -28,6 +28,7 @@ def upsert_settings(
     nominees_channel_id: int | None = None,
     elections_channel_id: int | None = None,
     laws_channel_id: int | None = None,
+    bank_transactions_channel_id: int | None = None,
     log_channel_id: int | None = None,
     voter_role_id: int | None = None,
     admin_role_id: int | None = None,
@@ -51,6 +52,8 @@ def upsert_settings(
         fields["elections_channel_id"] = elections_channel_id
     if laws_channel_id is not None:
         fields["laws_channel_id"] = laws_channel_id
+    if bank_transactions_channel_id is not None:
+        fields["bank_transactions_channel_id"] = bank_transactions_channel_id
     if log_channel_id is not None:
         fields["log_channel_id"] = log_channel_id
     if voter_role_id is not None:

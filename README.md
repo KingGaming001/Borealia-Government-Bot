@@ -124,6 +124,7 @@ Run `/setup` (server admins or configured admin role only):
 - `nominees_channel`
 - `elections_channel`
 - `laws_channel`
+- `bank_transactions_channel`
 - `voter_role`
 - `admin_role`
 - Optional: `log_channel`
@@ -166,6 +167,26 @@ Configure channels and roles for the current server.
 Show current bot configuration for the server.
 
 **Admin only**.
+
+#### `/financial_report`
+Generate a weekly nation bank summary from transaction posts in the configured bank channel.
+
+Parameters:
+
+- `week_offset` (optional, default `0`) — `0` = last completed week, `1` = week before that
+- `force` (optional, default `false`) — re-generate even if that week's report was already posted
+- `preview` (optional, default `false`) — generate privately (ephemeral), without posting or saving
+
+Behavior:
+
+- Parses transaction messages matching the Nation Bank template
+- Includes `Completed` transactions only in totals
+- Compares current week close vs previous week close and shows trend arrow
+- Posts the report in the configured `bank_transactions_channel`
+
+Automatic behavior:
+
+- The bot also attempts to auto-generate the report every Monday for each configured guild.
 
 ---
 

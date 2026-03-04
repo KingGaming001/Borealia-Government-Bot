@@ -62,6 +62,7 @@ def init_db(conn: sqlite3.Connection) -> None:
     nominees_channel_id INTEGER,
     elections_channel_id INTEGER,
     laws_channel_id INTEGER,
+    bank_transactions_channel_id INTEGER,
     log_channel_id INTEGER,
 
     voter_role_id INTEGER,
@@ -243,6 +244,25 @@ def init_db(conn: sqlite3.Connection) -> None:
                 UNIQUE (guild_id, motion_id, user_id)
             )
             """)  
+
+    # ------------------------------------------------------------
+    # 9b) Weekly financial reports (dedupe + audit)
+    # One row per (guild, report week id).
+    # ------------------------------------------------------------
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS financial_reports (
+            guild_id         INTEGER NOT NULL,
+            report_id        TEXT NOT NULL,
+            report_start_at  TEXT NOT NULL,
+            report_end_at    TEXT NOT NULL,
+            message_id       INTEGER,
+            generated_by     INTEGER,
+            mode             TEXT NOT NULL,   -- AUTO | MANUAL
+            generated_at     TEXT NOT NULL,
+
+            PRIMARY KEY (guild_id, report_id)
+        )
+    """)
     
     # ------------------------------------------------------------
     # 8) Migration: add Parliament fields to guild_settings (if missing)
@@ -265,6 +285,11 @@ def init_db(conn: sqlite3.Connection) -> None:
 
     try:
         cur.execute("ALTER TABLE guild_settings ADD COLUMN king_role_id INTEGER")
+    except sqlite3.OperationalError:
+        pass
+
+    try:
+        cur.execute("ALTER TABLE guild_settings ADD COLUMN bank_transactions_channel_id INTEGER")
     except sqlite3.OperationalError:
         pass
 

@@ -35,6 +35,7 @@ class SetupCommand(commands.Cog):
         nominees_channel="Channel where nominations are submitted",
         elections_channel="Channel where election panels + voting are posted",
         laws_channel="Channel where proposed laws are posted",
+        bank_transactions_channel="Channel where nation bank transaction logs are posted",
         log_channel="Staff log channel (optional)",
         voter_role="Role required to vote (e.g. Citizen)",
         admin_role="Role allowed to run admin commands (e.g., King)",
@@ -49,6 +50,7 @@ class SetupCommand(commands.Cog):
         nominees_channel: discord.TextChannel,
         elections_channel: discord.TextChannel,
         laws_channel: discord.TextChannel,
+        bank_transactions_channel: discord.TextChannel,
         voter_role: discord.Role,
         admin_role: discord.Role,
         log_channel: discord.TextChannel | None = None,  # ✅ optional param should have a default
@@ -89,6 +91,7 @@ class SetupCommand(commands.Cog):
             nominees_channel_id=nominees_channel.id,
             elections_channel_id=elections_channel.id,
             laws_channel_id=laws_channel.id,
+            bank_transactions_channel_id=bank_transactions_channel.id,
             log_channel_id=log_channel.id if log_channel else None,
             voter_role_id=voter_role.id,  # REQUIRED
             admin_role_id=admin_role.id,   # REQUIRED
@@ -113,6 +116,7 @@ class SetupCommand(commands.Cog):
                 f"• **Nominees Channel:** {nominees_channel.mention}\n"
                 f"• **Elections Channel:** {elections_channel.mention}\n"
                 f"• **Proposed Laws Channel:** {laws_channel.mention}\n"
+                f"• **Bank Transactions Channel:** {bank_transactions_channel.mention}\n"
                 f"• **Log Channel:** {log_channel.mention if log_channel else 'Not Set'}\n"
                 f"• **Voter Role:** {voter_role.mention}\n"
                 f"• **Admin Role:** {admin_role.mention}\n"
