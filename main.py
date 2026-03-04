@@ -24,8 +24,10 @@ import os
 import hashlib
 import traceback
 import importlib
+import sqlite3
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
+from typing import cast
 from zoneinfo import ZoneInfo
 
 import discord
@@ -52,7 +54,12 @@ if not TOKEN:
 intents = discord.Intents.default()
 intents.members = True
 
-bot = commands.Bot(command_prefix="!", intents=intents)
+class GovernmentBot(commands.Bot):
+    db: sqlite3.Connection
+    _election_views_restored: bool
+
+
+bot = GovernmentBot(command_prefix="!", intents=intents)
 
 # ------------------------------------------------------------
 # Database setup
@@ -67,7 +74,7 @@ init_db(bot.db)
 class VoteSelect(discord.ui.Select):
     def __init__(
         self,
-        bot: commands.Bot,
+        bot: GovernmentBot,
         guild_id: int,
         position: str,
         candidates: list[dict],
@@ -170,7 +177,7 @@ class VoteSelect(discord.ui.Select):
 class VoteView(discord.ui.View):
     def __init__(
         self,
-        bot: commands.Bot,
+        bot: GovernmentBot,
         guild_id: int,
         position: str,
         candidates: list[dict],
@@ -323,7 +330,10 @@ async def election_scheduler():
         view = VoteView(bot, guild_id, position, candidates, settings) if candidates else None
 
         # Post voting message
-        sent = await elections_channel.send(embed=embed, view=view)
+        if view is not None:
+            sent = await elections_channel.send(embed=embed, view=view)
+        else:
+            sent = await elections_channel.send(embed=embed)
 
         # Update election to VOTING + store vote_message_id
         cur3 = bot.db.cursor()
@@ -344,7 +354,7 @@ async def election_scheduler():
 # Helper function to close an election and DM results
 # ============================================================
 
-async def auto_close_election(guild_id: int, position: str, admin_user: discord.User | None = None):
+async def auto_close_election(guild_id: int, position: str, admin_user: discord.abc.Messageable | None = None):
     """
     Closes an election and sends results to the admin via DM.
     Called by the auto-closer task or manually.
@@ -560,7 +570,7 @@ async def auto_close_election(guild_id: int, position: str, admin_user: discord.
         if admin_id:
             admin_role = guild.get_role(int(admin_id))
             if admin_role and admin_role.members:
-                admin_user = admin_role.members[0]
+                admin_user = cast(discord.abc.Messageable, admin_role.members[0])
     
     if admin_user:
         try:
@@ -666,11 +676,12 @@ async def setup_hook():
 
     # Use a single command scope (global) to avoid duplicate entries in guilds.
     # If a test guild had previously been used, clear its guild-specific command set.
-    if getattr(config, "TEST_GUILD_ID", None):
-        guild = discord.Object(id=config.TEST_GUILD_ID)
+    test_guild_id = getattr(config, "TEST_GUILD_ID", None)
+    if isinstance(test_guild_id, int):
+        guild = discord.Object(id=test_guild_id)
         bot.tree.clear_commands(guild=guild)
         await bot.tree.sync(guild=guild)
-        print(f"🧹 Cleared guild-specific commands in TEST guild {config.TEST_GUILD_ID}")
+        print(f"🧹 Cleared guild-specific commands in TEST guild {test_guild_id}")
 
     synced = await bot.tree.sync()
     print(f"🌐 Synced {len(synced)} slash commands globally")
@@ -807,7 +818,10 @@ async def election_repost_vote(interaction: discord.Interaction, position: str |
 async def on_ready():
     print("========================================")
     print(f"✅ Logged in as: {bot.user}")
-    print(f"🆔 Bot ID: {bot.user.id}")
+    if bot.user is not None:
+        print(f"🆔 Bot ID: {bot.user.id}")
+    else:
+        print("🆔 Bot ID: unknown")
     print("========================================")
     print("🏛️ Borealia Government Bot is online.")
 

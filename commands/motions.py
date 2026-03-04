@@ -11,6 +11,8 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import sqlite3
+from typing import Any, cast
 
 import discord
 from discord import app_commands
@@ -38,7 +40,7 @@ from commands.motion_views import MotionVoteView, RoyalAssentView
 
 
 async def update_rollcall_message(bot: commands.Bot, guild: discord.Guild, motion_id: int, clear_view: bool = False) -> None:
-    db = bot.db
+    db: sqlite3.Connection = cast(Any, bot).db
     cur = db.cursor()
 
     cur.execute("SELECT * FROM motions WHERE guild_id = ? AND motion_id = ?", (guild.id, motion_id))
@@ -80,6 +82,7 @@ async def update_rollcall_message(bot: commands.Bot, guild: discord.Guild, motio
 class Motions(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+        self.db: sqlite3.Connection = cast(Any, bot).db
 
     async def cog_load(self):
         if not self.motion_scheduler.is_running():
@@ -95,7 +98,7 @@ class Motions(commands.Cog):
     @tasks.loop(seconds=30)
     async def motion_scheduler(self):
         now_utc = datetime.now(timezone.utc)
-        cur = self.bot.db.cursor()
+        cur = self.db.cursor()
         cur.execute(
             """
             SELECT guild_id, motion_id, closes_at
@@ -123,7 +126,7 @@ class Motions(commands.Cog):
         await self.restore_pending_assent_views()
 
     async def restore_open_motion_vote_views(self):
-        cur = self.bot.db.cursor()
+        cur = self.db.cursor()
         cur.execute(
             """
             SELECT guild_id, motion_id, message_channel_id, message_id
@@ -151,7 +154,7 @@ class Motions(commands.Cog):
                 continue
 
     async def restore_pending_assent_views(self):
-        cur = self.bot.db.cursor()
+        cur = self.db.cursor()
         cur.execute(
             """
             SELECT guild_id, motion_id, assent_channel_id, assent_message_id
@@ -204,7 +207,7 @@ class Motions(commands.Cog):
         if assent_message is None:
             assent_message = await channel.send(embed=embed, view=view)
 
-        cur = self.bot.db.cursor()
+        cur = self.db.cursor()
         cur.execute(
             """
             UPDATE motions
@@ -213,7 +216,7 @@ class Motions(commands.Cog):
             """,
             (channel.id, assent_message.id, guild.id, motion_id),
         )
-        self.bot.db.commit()
+        self.db.commit()
 
     async def update_assent_message(self, guild: discord.Guild, motion, decision: str, decider: discord.Member) -> None:
         if not motion_value(motion, "assent_channel_id") or not motion_value(motion, "assent_message_id"):
@@ -228,7 +231,7 @@ class Motions(commands.Cog):
             return
 
     async def get_act(self, guild_id: int, act_id: int):
-        cur = self.bot.db.cursor()
+        cur = self.db.cursor()
         cur.execute(
             """
             SELECT *
@@ -240,7 +243,7 @@ class Motions(commands.Cog):
         return cur.fetchone()
 
     async def register_enacted_act(self, guild_id: int, motion, enacted_by_user_id: int) -> int:
-        cur = self.bot.db.cursor()
+        cur = self.db.cursor()
 
         source_motion_id = int(motion["motion_id"])
         cur.execute(
@@ -262,11 +265,14 @@ class Motions(commands.Cog):
             """,
             (guild_id, source_motion_id, motion["title"], motion["text"], enacted_by_user_id, iso_now()),
         )
-        self.bot.db.commit()
-        return int(cur.lastrowid)
+        self.db.commit()
+        lastrowid = cur.lastrowid
+        if lastrowid is None:
+            raise RuntimeError("Failed to persist enacted act")
+        return int(lastrowid)
 
     async def apply_repeal_to_act(self, guild_id: int, target_act_id: int, repeal_motion_id: int, assenter_user_id: int) -> bool:
-        cur = self.bot.db.cursor()
+        cur = self.db.cursor()
         cur.execute(
             """
             UPDATE acts
@@ -280,11 +286,11 @@ class Motions(commands.Cog):
             """,
             (repeal_motion_id, assenter_user_id, iso_now(), guild_id, target_act_id),
         )
-        self.bot.db.commit()
+        self.db.commit()
         return cur.rowcount > 0
 
     async def publish_law_from_motion(self, guild: discord.Guild, motion, decider: discord.Member) -> bool:
-        settings = get_settings(self.bot.db, guild.id)
+        settings = get_settings(self.db, guild.id)
         if not settings or not settings.get("laws_channel_id"):
             return False
         channel = guild.get_channel(int(settings["laws_channel_id"]))
@@ -294,14 +300,14 @@ class Motions(commands.Cog):
         return True
 
     async def publish_repeal_from_motion(self, guild: discord.Guild, motion, target_act_id: int, decider: discord.Member) -> bool:
-        settings = get_settings(self.bot.db, guild.id)
+        settings = get_settings(self.db, guild.id)
         if not settings or not settings.get("laws_channel_id"):
             return False
         channel = guild.get_channel(int(settings["laws_channel_id"]))
         if not isinstance(channel, discord.TextChannel):
             return False
-        repeal_motion_summary = get_repeal_motion_summary(self.bot.db, guild.id, motion)
-        repeal_original_proposer = get_repeal_original_proposer(self.bot.db, guild.id, motion)
+        repeal_motion_summary = get_repeal_motion_summary(self.db, guild.id, motion)
+        repeal_original_proposer = get_repeal_original_proposer(self.db, guild.id, motion)
         await channel.send(
             embed=build_repeal_embed(
                 int(motion["motion_id"]),
@@ -318,14 +324,14 @@ class Motions(commands.Cog):
         if not interaction.guild or not isinstance(interaction.user, discord.Member):
             return await interaction.response.send_message("❌ Server-only.", ephemeral=True)
 
-        settings = get_settings(self.bot.db, interaction.guild.id)
+        settings = get_settings(self.db, interaction.guild.id)
         if not has_king_role(interaction.user, settings):
             return await interaction.response.send_message(
                 "❌ Only members with the configured King role can grant or deny Royal Assent.",
                 ephemeral=True,
             )
 
-        cur = self.bot.db.cursor()
+        cur = self.db.cursor()
         cur.execute("SELECT * FROM motions WHERE guild_id = ? AND motion_id = ?", (interaction.guild.id, motion_id))
         motion = cur.fetchone()
         if not motion:
@@ -350,10 +356,10 @@ class Motions(commands.Cog):
             (decision, interaction.user.id, iso_now(), final_result, interaction.guild.id, motion_id),
         )
         if cur.rowcount == 0:
-            self.bot.db.commit()
+            self.db.commit()
             return await interaction.response.send_message("ℹ️ Royal Assent has already been finalized for this motion.", ephemeral=True)
 
-        self.bot.db.commit()
+        self.db.commit()
 
         cur.execute("SELECT * FROM motions WHERE guild_id = ? AND motion_id = ?", (interaction.guild.id, motion_id))
         updated_motion = cur.fetchone()
@@ -431,13 +437,13 @@ class Motions(commands.Cog):
         )
 
     async def close_motion_and_publish_result(self, guild: discord.Guild, motion_id: int):
-        cur = self.bot.db.cursor()
+        cur = self.db.cursor()
         cur.execute("SELECT * FROM motions WHERE guild_id = ? AND motion_id = ?", (guild.id, motion_id))
         motion = cur.fetchone()
         if not motion or motion["status"] != "VOTING":
             return None
 
-        tally = tally_motion(self.bot.db, guild.id, motion_id)
+        tally = tally_motion(self.db, guild.id, motion_id)
         final_result = tally["result"]
         assent_status = "PENDING" if final_result == "PASSED" else None
 
@@ -455,7 +461,7 @@ class Motions(commands.Cog):
         )
         if cur.rowcount == 0:
             return None
-        self.bot.db.commit()
+        self.db.commit()
 
         cur.execute("SELECT * FROM motions WHERE guild_id = ? AND motion_id = ?", (guild.id, motion_id))
         closed_motion = cur.fetchone()
@@ -467,8 +473,8 @@ class Motions(commands.Cog):
         if closed_motion["message_channel_id"]:
             channel = guild.get_channel(int(closed_motion["message_channel_id"]))
             if isinstance(channel, discord.TextChannel):
-                repeal_motion_summary = get_repeal_motion_summary(self.bot.db, guild.id, closed_motion) if motion_kind(closed_motion) == "repeal" else None
-                repeal_original_proposer = get_repeal_original_proposer(self.bot.db, guild.id, closed_motion) if motion_kind(closed_motion) == "repeal" else None
+                repeal_motion_summary = get_repeal_motion_summary(self.db, guild.id, closed_motion) if motion_kind(closed_motion) == "repeal" else None
+                repeal_original_proposer = get_repeal_original_proposer(self.db, guild.id, closed_motion) if motion_kind(closed_motion) == "repeal" else None
                 await channel.send(
                     embed=build_result_embed(
                         motion_id,
@@ -488,12 +494,15 @@ class Motions(commands.Cog):
     @app_commands.guild_only()
     @app_commands.describe(kind="act/resolution/confidence/etc", title="Short title", text="Full text")
     async def motion_create(self, interaction: discord.Interaction, kind: str, title: str, text: str):
-        settings = get_settings(self.bot.db, interaction.guild.id)
+        if not interaction.guild:
+            return await interaction.response.send_message("❌ Server-only.", ephemeral=True)
+
+        settings = get_settings(self.db, interaction.guild.id)
         is_voter = isinstance(interaction.user, discord.Member) and has_voter_role(interaction.user, settings)
         if not (is_admin(interaction, settings) or is_voter):
             return await interaction.response.send_message("❌ Only admins or users with the voter role can create drafts.", ephemeral=True)
 
-        cur = self.bot.db.cursor()
+        cur = self.db.cursor()
         cur.execute(
             """
             INSERT INTO motions (guild_id, kind, title, text, created_by, created_at, status, opens_at, closes_at, public_votes, target_act_id)
@@ -501,9 +510,12 @@ class Motions(commands.Cog):
             """,
             (interaction.guild.id, kind, title, text, interaction.user.id, iso_now()),
         )
-        self.bot.db.commit()
+        self.db.commit()
 
-        motion_id = cur.lastrowid
+        lastrowid = cur.lastrowid
+        if lastrowid is None:
+            return await interaction.response.send_message("❌ Failed to create motion draft.", ephemeral=True)
+        motion_id = int(lastrowid)
 
         cur.execute("SELECT * FROM motions WHERE guild_id = ? AND motion_id = ?", (interaction.guild.id, motion_id))
         motion = cur.fetchone()
@@ -522,7 +534,7 @@ class Motions(commands.Cog):
                     """,
                     (channel.id, draft_msg.id, interaction.guild.id, motion_id),
                 )
-                self.bot.db.commit()
+                self.db.commit()
                 posted_preview = True
 
         await interaction.response.send_message(
@@ -538,7 +550,10 @@ class Motions(commands.Cog):
     @app_commands.guild_only()
     @app_commands.describe(act_id="The enacted act number to repeal", reason="Reason for repeal")
     async def motion_repeal(self, interaction: discord.Interaction, act_id: int, reason: str):
-        settings = get_settings(self.bot.db, interaction.guild.id)
+        if not interaction.guild:
+            return await interaction.response.send_message("❌ Server-only.", ephemeral=True)
+
+        settings = get_settings(self.db, interaction.guild.id)
         is_voter = isinstance(interaction.user, discord.Member) and has_voter_role(interaction.user, settings)
         if not (is_admin(interaction, settings) or is_voter):
             return await interaction.response.send_message("❌ Only admins or users with the voter role can create repeal motions.", ephemeral=True)
@@ -556,7 +571,7 @@ class Motions(commands.Cog):
             f"Original Act Text:\n{str(act['text'])[:2400]}"
         )
 
-        cur = self.bot.db.cursor()
+        cur = self.db.cursor()
         cur.execute(
             """
             INSERT INTO motions (guild_id, kind, title, text, created_by, created_at, status, opens_at, closes_at, public_votes, target_act_id)
@@ -564,9 +579,12 @@ class Motions(commands.Cog):
             """,
             (interaction.guild.id, repeal_title, repeal_text, interaction.user.id, iso_now(), act_id),
         )
-        self.bot.db.commit()
+        self.db.commit()
 
-        motion_id = cur.lastrowid
+        lastrowid = cur.lastrowid
+        if lastrowid is None:
+            return await interaction.response.send_message("❌ Failed to create repeal motion draft.", ephemeral=True)
+        motion_id = int(lastrowid)
 
         cur.execute("SELECT * FROM motions WHERE guild_id = ? AND motion_id = ?", (interaction.guild.id, motion_id))
         motion = cur.fetchone()
@@ -585,7 +603,7 @@ class Motions(commands.Cog):
                     """,
                     (channel.id, draft_msg.id, interaction.guild.id, motion_id),
                 )
-                self.bot.db.commit()
+                self.db.commit()
                 posted_preview = True
 
         await interaction.response.send_message(
@@ -601,7 +619,10 @@ class Motions(commands.Cog):
     @app_commands.guild_only()
     @app_commands.describe(motion_id="The motion number")
     async def motion_open(self, interaction: discord.Interaction, motion_id: int):
-        settings = get_settings(self.bot.db, interaction.guild.id)
+        if not interaction.guild:
+            return await interaction.response.send_message("❌ Server-only.", ephemeral=True)
+
+        settings = get_settings(self.db, interaction.guild.id)
         if not is_admin(interaction, settings):
             return await interaction.response.send_message("❌ Admins only.", ephemeral=True)
 
@@ -611,7 +632,7 @@ class Motions(commands.Cog):
                 ephemeral=True,
             )
 
-        cur = self.bot.db.cursor()
+        cur = self.db.cursor()
         cur.execute("SELECT status FROM motions WHERE guild_id = ? AND motion_id = ?", (interaction.guild.id, motion_id))
         row = cur.fetchone()
         if not row:
@@ -630,7 +651,7 @@ class Motions(commands.Cog):
             """,
             (opens_at, closes_at, interaction.guild.id, motion_id),
         )
-        self.bot.db.commit()
+        self.db.commit()
 
         channel = interaction.guild.get_channel(int(settings["parliament_channel_id"]))
         if not isinstance(channel, discord.TextChannel):
@@ -640,8 +661,8 @@ class Motions(commands.Cog):
         motion = cur.fetchone()
 
         empty_tally = {"yes": [], "no": [], "abstain": [], "result": "TIED"}
-        repeal_motion_summary = get_repeal_motion_summary(self.bot.db, interaction.guild.id, motion) if motion_kind(motion) == "repeal" else None
-        repeal_original_proposer = get_repeal_original_proposer(self.bot.db, interaction.guild.id, motion) if motion_kind(motion) == "repeal" else None
+        repeal_motion_summary = get_repeal_motion_summary(self.db, interaction.guild.id, motion) if motion_kind(motion) == "repeal" else None
+        repeal_original_proposer = get_repeal_original_proposer(self.db, interaction.guild.id, motion) if motion_kind(motion) == "repeal" else None
         embed = build_motion_rollcall_embed(
             motion_id,
             motion,
@@ -671,7 +692,7 @@ class Motions(commands.Cog):
             """,
             (channel.id, msg.id, interaction.guild.id, motion_id),
         )
-        self.bot.db.commit()
+        self.db.commit()
 
         await update_rollcall_message(self.bot, interaction.guild, motion_id)
 
@@ -691,11 +712,14 @@ class Motions(commands.Cog):
     @app_commands.guild_only()
     @app_commands.describe(motion_id="The motion number")
     async def motion_close(self, interaction: discord.Interaction, motion_id: int):
-        settings = get_settings(self.bot.db, interaction.guild.id)
+        if not interaction.guild:
+            return await interaction.response.send_message("❌ Server-only.", ephemeral=True)
+
+        settings = get_settings(self.db, interaction.guild.id)
         if not is_admin(interaction, settings):
             return await interaction.response.send_message("❌ Admins only.", ephemeral=True)
 
-        cur = self.bot.db.cursor()
+        cur = self.db.cursor()
         cur.execute("SELECT status FROM motions WHERE guild_id = ? AND motion_id = ?", (interaction.guild.id, motion_id))
         row = cur.fetchone()
         if not row:
@@ -718,16 +742,19 @@ class Motions(commands.Cog):
     @app_commands.guild_only()
     @app_commands.describe(motion_id="The motion number")
     async def motion_results(self, interaction: discord.Interaction, motion_id: int):
-        cur = self.bot.db.cursor()
+        if not interaction.guild:
+            return await interaction.response.send_message("❌ Server-only.", ephemeral=True)
+
+        cur = self.db.cursor()
         cur.execute("SELECT * FROM motions WHERE guild_id = ? AND motion_id = ?", (interaction.guild.id, motion_id))
         motion = cur.fetchone()
         if not motion:
             return await interaction.response.send_message("❌ Motion not found.", ephemeral=True)
 
-        tally = tally_motion(self.bot.db, interaction.guild.id, motion_id)
+        tally = tally_motion(self.db, interaction.guild.id, motion_id)
 
-        repeal_motion_summary = get_repeal_motion_summary(self.bot.db, interaction.guild.id, motion) if motion_kind(motion) == "repeal" else None
-        repeal_original_proposer = get_repeal_original_proposer(self.bot.db, interaction.guild.id, motion) if motion_kind(motion) == "repeal" else None
+        repeal_motion_summary = get_repeal_motion_summary(self.db, interaction.guild.id, motion) if motion_kind(motion) == "repeal" else None
+        repeal_original_proposer = get_repeal_original_proposer(self.db, interaction.guild.id, motion) if motion_kind(motion) == "repeal" else None
         embed = build_motion_rollcall_embed(
             motion_id,
             motion,

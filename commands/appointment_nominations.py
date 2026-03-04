@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+# Appointment nominations are intentionally separate from elections:
+# no public voting phase, only nomination collection and private admin review.
+
 from datetime import datetime, timezone, timedelta
+import sqlite3
+from typing import Any, cast
 from zoneinfo import ZoneInfo
 
 import discord
@@ -10,6 +15,10 @@ from discord.ext import commands, tasks
 from config_store import get_settings, is_admin
 
 LONDON_TZ = ZoneInfo("Europe/London")
+
+
+def _db(bot: commands.Bot) -> sqlite3.Connection:
+    return cast(Any, bot).db
 
 
 def utc_iso_to_london_str(iso_utc: str) -> str:
@@ -109,7 +118,8 @@ async def refresh_appointment_nominees_message(
     closes_at_iso_utc: str | None = None,
     open_status: bool = True,
 ) -> None:
-    cur = bot.db.cursor()
+    db = _db(bot)
+    cur = db.cursor()
     cur.execute(
         """
         SELECT user_id, display_name
@@ -145,11 +155,13 @@ async def refresh_appointment_nominees_message(
         "UPDATE appointment_positions SET nominee_message_id = ? WHERE guild_id = ? AND position = ?",
         (sent.id, guild_id, position),
     )
-    bot.db.commit()
+    db.commit()
 
 
 def get_open_appointment_targets(bot: commands.Bot, guild_id: int, now_utc: datetime) -> list[dict]:
-    cur = bot.db.cursor()
+    # Returns only currently-open tracks; expired rows are ignored so the
+    # nomination UI can safely show mixed election + appointment options.
+    cur = _db(bot).cursor()
     cur.execute(
         """
         SELECT position, nomination_closes_at
@@ -193,7 +205,10 @@ async def handle_appointment_nomination(
     ballot_name: str,
     position: str,
 ) -> tuple[bool, str]:
-    cur = bot.db.cursor()
+    # Late nominations auto-close stale tracks to keep DB status truthful even
+    # if the background auto-closer has not run yet.
+    db = _db(bot)
+    cur = db.cursor()
     cur.execute(
         "SELECT status, nominee_message_id, nomination_closes_at FROM appointment_positions WHERE guild_id = ? AND position = ?",
         (guild_id, position),
@@ -223,7 +238,7 @@ async def handle_appointment_nomination(
                 """,
                 (now_utc.isoformat(), guild_id, position),
             )
-            bot.db.commit()
+            db.commit()
 
             await refresh_appointment_nominees_message(
                 bot=bot,
@@ -245,7 +260,7 @@ async def handle_appointment_nomination(
         """,
         (guild_id, position, user_id, ballot_name),
     )
-    bot.db.commit()
+    db.commit()
 
     await refresh_appointment_nominees_message(
         bot=bot,
@@ -270,7 +285,8 @@ async def remove_open_appointment_nominee(
     position: str,
     candidate_id: int,
 ) -> bool:
-    cur = bot.db.cursor()
+    db = _db(bot)
+    cur = db.cursor()
     cur.execute(
         "SELECT status, nominee_message_id, nomination_closes_at FROM appointment_positions WHERE guild_id = ? AND position = ?",
         (guild_id, position),
@@ -286,7 +302,7 @@ async def remove_open_appointment_nominee(
     if cur.rowcount == 0:
         return False
 
-    bot.db.commit()
+    db.commit()
     await refresh_appointment_nominees_message(
         bot=bot,
         nominees_channel=nominees_channel,
@@ -302,6 +318,7 @@ async def remove_open_appointment_nominee(
 class AppointmentNominationsCommand(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+        self.db: sqlite3.Connection = _db(bot)
 
     async def cog_load(self):
         if not self.appointment_nomination_auto_closer.is_running():
@@ -313,9 +330,11 @@ class AppointmentNominationsCommand(commands.Cog):
 
     @tasks.loop(seconds=30)
     async def appointment_nomination_auto_closer(self):
+        # Polling loop closes tracks that have reached nomination_closes_at and
+        # refreshes the public nominees embed to show CLOSED state.
         now_utc = datetime.now(timezone.utc)
 
-        cur = self.bot.db.cursor()
+        cur = self.db.cursor()
         cur.execute(
             """
             SELECT guild_id, position, nominee_message_id, nomination_closes_at
@@ -345,7 +364,7 @@ class AppointmentNominationsCommand(commands.Cog):
             if closes_at_utc > now_utc:
                 continue
 
-            cur2 = self.bot.db.cursor()
+            cur2 = self.db.cursor()
             cur2.execute(
                 """
                 UPDATE appointment_positions
@@ -358,12 +377,12 @@ class AppointmentNominationsCommand(commands.Cog):
             )
             if cur2.rowcount == 0:
                 continue
-            self.bot.db.commit()
+            self.db.commit()
 
             guild = self.bot.get_guild(guild_id)
             if not guild:
                 continue
-            settings = get_settings(self.bot.db, guild_id)
+            settings = get_settings(self.db, guild_id)
             if not settings:
                 continue
 
@@ -409,7 +428,7 @@ class AppointmentNominationsCommand(commands.Cog):
             return
 
         guild_id = interaction.guild.id
-        settings = get_settings(self.bot.db, guild_id)
+        settings = get_settings(self.db, guild_id)
         if not settings:
             await interaction.response.send_message("❌ Bot not configured. Ask an admin to run **/setup**.", ephemeral=True)
             return
@@ -431,7 +450,7 @@ class AppointmentNominationsCommand(commands.Cog):
         now_utc = datetime.now(timezone.utc)
         closes_at_iso = (now_utc + timedelta(hours=int(duration_hours))).isoformat() if duration_hours else None
 
-        cur = self.bot.db.cursor()
+        cur = self.db.cursor()
         cur.execute(
             """
             INSERT INTO appointment_positions (
@@ -456,7 +475,7 @@ class AppointmentNominationsCommand(commands.Cog):
                 (guild_id, position),
             )
 
-        self.bot.db.commit()
+        self.db.commit()
 
         cur.execute(
             "SELECT nominee_message_id, nomination_closes_at FROM appointment_positions WHERE guild_id = ? AND position = ?",
@@ -499,7 +518,7 @@ class AppointmentNominationsCommand(commands.Cog):
             return
 
         guild_id = interaction.guild.id
-        settings = get_settings(self.bot.db, guild_id)
+        settings = get_settings(self.db, guild_id)
         if not settings:
             await interaction.response.send_message("❌ Bot not configured. Ask an admin to run **/setup**.", ephemeral=True)
             return
@@ -518,7 +537,7 @@ class AppointmentNominationsCommand(commands.Cog):
             await interaction.response.send_message("❌ Configured nominees channel not found.", ephemeral=True)
             return
 
-        cur = self.bot.db.cursor()
+        cur = self.db.cursor()
         cur.execute(
             "SELECT status, nominee_message_id, nomination_closes_at FROM appointment_positions WHERE guild_id = ? AND position = ?",
             (guild_id, position),
@@ -547,7 +566,7 @@ class AppointmentNominationsCommand(commands.Cog):
             """,
             (interaction.user.id, now_utc.isoformat(), guild_id, position),
         )
-        self.bot.db.commit()
+        self.db.commit()
 
         cur.execute(
             """
@@ -613,7 +632,7 @@ class AppointmentNominationsCommand(commands.Cog):
             return
 
         guild_id = interaction.guild.id
-        settings = get_settings(self.bot.db, guild_id)
+        settings = get_settings(self.db, guild_id)
         if not settings:
             await interaction.response.send_message("❌ Bot not configured. Ask an admin to run **/setup**.", ephemeral=True)
             return
@@ -622,7 +641,7 @@ class AppointmentNominationsCommand(commands.Cog):
             await interaction.response.send_message("❌ You do not have permission to use this command.", ephemeral=True)
             return
 
-        cur = self.bot.db.cursor()
+        cur = self.db.cursor()
         cur.execute(
             "SELECT status, nomination_closes_at FROM appointment_positions WHERE guild_id = ? AND position = ?",
             (guild_id, position),

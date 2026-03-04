@@ -9,6 +9,7 @@ TOKEN = os.getenv("DISCORD_TOKEN")
 
 # Optional: set this ONLY for fast dev sync in one server.
 # In production (multi-server), leave it unset so commands sync globally.
+# Uses `0` as an easy "disabled" sentinel in .env.
 TEST_GUILD_ID = int(os.getenv("TEST_GUILD_ID", "0")) or None
 
 # Database path

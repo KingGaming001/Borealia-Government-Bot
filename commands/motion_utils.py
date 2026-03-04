@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+# Shared helpers for Parliament motion embeds, tallying, and date formatting.
+# Kept separate from command handlers so UI and business logic stay reusable.
+
 from datetime import datetime, timezone
 
 import discord
@@ -116,6 +119,8 @@ def tally_motion(db, guild_id: int, motion_id: int) -> dict:
     c = db.cursor()
     vote_columns = get_motion_vote_columns(db)
 
+    # Backward compatibility: older DBs used `vote`, newer DBs use `choice`.
+    # We normalize to one SQL expression so tally logic stays identical.
     if "choice" in vote_columns and "vote" in vote_columns:
         vote_expr = "COALESCE(choice, vote)"
     elif "choice" in vote_columns:

@@ -1,6 +1,8 @@
 import sqlite3
 import config
 
+# Quick local diagnostic script:
+# prints current columns in votes so constraints and migrations are visible.
 conn = sqlite3.connect(config.DATABASE_PATH)
 cur = conn.cursor()
 

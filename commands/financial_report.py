@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+# Weekly financial reporting pipeline:
+# - parses Nation Bank transaction messages from a configured channel
+# - computes weekly totals/balances in Europe/London week boundaries
+# - supports scheduled auto-post and manual on-demand generation
+
 import re
 import traceback
 import sqlite3
@@ -32,6 +37,8 @@ def _parse_amount(raw: str) -> float | None:
 
 
 def _message_text(message: discord.Message) -> str:
+    # The transaction bot sometimes stores data in embed fields rather than
+    # plain content, so we normalize all text sources into one searchable blob.
     parts: list[str] = []
     if message.content:
         parts.append(message.content)
@@ -53,6 +60,8 @@ def _report_id_from_start(start_local: datetime) -> str:
 
 
 def _last_completed_week_bounds(week_offset: int = 0) -> tuple[datetime, datetime]:
+    # Week window is Monday 00:00 -> next Monday 00:00 in London time.
+    # week_offset=0 means "last completed week".
     now_local = datetime.now(LONDON_TZ)
     this_week_start = (now_local - timedelta(days=now_local.weekday())).replace(
         hour=0,
@@ -152,6 +161,7 @@ class FinancialReportCommand(commands.Cog):
         self.db.commit()
 
     def _parse_transaction(self, message: discord.Message) -> dict | None:
+        # Guardrail so unrelated channel chatter does not pollute the report.
         text = _message_text(message)
         if "nation bank transaction" not in text.lower():
             return None
@@ -387,6 +397,8 @@ class FinancialReportCommand(commands.Cog):
 
     @tasks.loop(hours=1)
     async def weekly_report_loop(self):
+        # Run hourly but only execute report generation at local Monday 00:00.
+        # This avoids brittle long-sleep scheduling and handles restarts cleanly.
         now_local = datetime.now(LONDON_TZ)
 
         if now_local.weekday() != 0:

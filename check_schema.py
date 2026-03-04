@@ -1,6 +1,8 @@
 import sqlite3
 import config
 
+# Quick local diagnostic script:
+# prints current columns in guild_settings so migrations can be verified.
 conn = sqlite3.connect(config.DATABASE_PATH)
 cur = conn.cursor()
 

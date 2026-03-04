@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+# Interactive UI components for Parliament motions:
+# - vote dropdown used in roll-call messages
+# - royal assent buttons used after a motion passes Parliament
+
 import sqlite3
 from datetime import datetime, timezone
-from typing import Awaitable, Callable
+from typing import Any, Awaitable, Callable, cast
 
 import discord
 from discord.ext import commands
@@ -19,6 +23,7 @@ class MotionVoteSelect(discord.ui.Select):
         on_vote_recorded: Callable[[discord.Guild, int], Awaitable[None]],
     ):
         self.bot = bot
+        self.db: sqlite3.Connection = cast(Any, bot).db
         self.motion_id = motion_id
         self.on_vote_recorded = on_vote_recorded
 
@@ -41,14 +46,14 @@ class MotionVoteSelect(discord.ui.Select):
         if not interaction.guild or not isinstance(interaction.user, discord.Member):
             return await interaction.response.send_message("❌ Server-only.", ephemeral=True)
 
-        settings = get_settings(self.bot.db, interaction.guild.id)
+        settings = get_settings(self.db, interaction.guild.id)
         if not settings:
             return await interaction.response.send_message("❌ Server not configured. Run /setup first.", ephemeral=True)
 
         if not has_parliament_role(interaction.user, settings):
             return await interaction.response.send_message("❌ Only Parliament may vote on motions.", ephemeral=True)
 
-        cur = self.bot.db.cursor()
+        cur = self.db.cursor()
         cur.execute(
             "SELECT status, closes_at FROM motions WHERE guild_id = ? AND motion_id = ?",
             (interaction.guild.id, self.motion_id),
@@ -62,9 +67,10 @@ class MotionVoteSelect(discord.ui.Select):
             return await interaction.response.send_message("❌ Voting has already closed for this motion.", ephemeral=True)
 
         try:
-            vote_columns = get_motion_vote_columns(self.bot.db)
+            vote_columns = get_motion_vote_columns(self.db)
             params = (interaction.guild.id, self.motion_id, interaction.user.id, choice)
 
+            # Insert path supports both legacy and migrated schemas.
             if "choice" in vote_columns and "vote" in vote_columns:
                 cur.execute(
                     """
@@ -92,7 +98,7 @@ class MotionVoteSelect(discord.ui.Select):
             else:
                 raise RuntimeError("motion_votes table has no vote column")
 
-            self.bot.db.commit()
+            self.db.commit()
         except sqlite3.IntegrityError as exc:
             message = str(exc).lower()
             if "unique constraint failed" in message:
@@ -106,6 +112,7 @@ class MotionVoteSelect(discord.ui.Select):
             return await interaction.response.send_message("🔒 Your vote is already recorded and locked.", ephemeral=True)
 
         await self.on_vote_recorded(interaction.guild, self.motion_id)
+        # Acknowledge after callback so users only see success if tally refresh ran.
         await interaction.response.send_message("✅ Vote recorded.", ephemeral=True)
 
 
@@ -123,7 +130,7 @@ class MotionVoteView(discord.ui.View):
 class RoyalAssentButton(discord.ui.Button):
     def __init__(
         self,
-        assent_handler: Callable[[discord.Interaction, int, str], Awaitable[None]],
+        assent_handler: Callable[[discord.Interaction, int, str], Awaitable[object]],
         motion_id: int,
         action: str,
     ):
@@ -147,7 +154,7 @@ class RoyalAssentButton(discord.ui.Button):
 class RoyalAssentView(discord.ui.View):
     def __init__(
         self,
-        assent_handler: Callable[[discord.Interaction, int, str], Awaitable[None]],
+        assent_handler: Callable[[discord.Interaction, int, str], Awaitable[object]],
         motion_id: int,
     ):
         super().__init__(timeout=None)
