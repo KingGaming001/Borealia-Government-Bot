@@ -708,6 +708,109 @@ class Motions(commands.Cog):
         view = MotionVoteView(self.bot, motion_id, self.on_motion_vote_recorded)
         await interaction.response.send_message(f"Cast your vote on motion #{motion_id}:", view=view, ephemeral=True)
 
+    @app_commands.command(
+        name="motion_repost_vote",
+        description="Admin: repost the voting panel for an active motion without clearing votes.",
+    )
+    @app_commands.guild_only()
+    @app_commands.describe(motion_id="The motion number (optional if only one motion is currently in VOTING)")
+    async def motion_repost_vote(self, interaction: discord.Interaction, motion_id: int | None = None):
+        if not interaction.guild:
+            return await interaction.response.send_message("❌ Server-only.", ephemeral=True)
+
+        settings = get_settings(self.db, interaction.guild.id)
+        if not is_admin(interaction, settings):
+            return await interaction.response.send_message("❌ Admins only.", ephemeral=True)
+
+        if not settings or not settings.get("parliament_channel_id"):
+            return await interaction.response.send_message(
+                "❌ Parliament channel not set. Run `/setup` and set `parliament_channel`.",
+                ephemeral=True,
+            )
+
+        channel = interaction.guild.get_channel(int(settings["parliament_channel_id"]))
+        if not isinstance(channel, discord.TextChannel):
+            return await interaction.response.send_message("❌ Configured parliament channel is invalid.", ephemeral=True)
+
+        cur = self.db.cursor()
+        if motion_id is None:
+            cur.execute(
+                """
+                SELECT *
+                FROM motions
+                WHERE guild_id = ? AND status = 'VOTING'
+                ORDER BY motion_id ASC
+                """,
+                (interaction.guild.id,),
+            )
+            rows = cur.fetchall()
+            if not rows:
+                return await interaction.response.send_message("❌ No active VOTING motions found.", ephemeral=True)
+            if len(rows) > 1:
+                ids = ", ".join(str(r["motion_id"]) for r in rows)
+                return await interaction.response.send_message(
+                    f"❌ Multiple active motions found: {ids}. Please pass **motion_id**.",
+                    ephemeral=True,
+                )
+            motion = rows[0]
+            motion_id = int(motion["motion_id"])
+        else:
+            cur.execute(
+                """
+                SELECT *
+                FROM motions
+                WHERE guild_id = ? AND motion_id = ?
+                """,
+                (interaction.guild.id, motion_id),
+            )
+            motion = cur.fetchone()
+            if not motion:
+                return await interaction.response.send_message("❌ Motion not found.", ephemeral=True)
+            if motion["status"] != "VOTING":
+                return await interaction.response.send_message("❌ Motion is not currently open for voting.", ephemeral=True)
+
+        old_channel_id = motion["message_channel_id"]
+        old_message_id = motion["message_id"]
+
+        tally = tally_motion(self.db, interaction.guild.id, motion_id)
+        repeal_motion_summary = get_repeal_motion_summary(self.db, interaction.guild.id, motion) if motion_kind(motion) == "repeal" else None
+        repeal_original_proposer = get_repeal_original_proposer(self.db, interaction.guild.id, motion) if motion_kind(motion) == "repeal" else None
+        embed = build_motion_rollcall_embed(
+            motion_id,
+            motion,
+            tally,
+            interaction.guild,
+            repeal_motion_summary=repeal_motion_summary,
+            repeal_original_proposer=repeal_original_proposer,
+        )
+
+        sent = await channel.send(embed=embed, view=MotionVoteView(self.bot, motion_id, self.on_motion_vote_recorded))
+
+        cur.execute(
+            """
+            UPDATE motions
+            SET message_channel_id = ?, message_id = ?
+            WHERE guild_id = ? AND motion_id = ?
+            """,
+            (channel.id, sent.id, interaction.guild.id, motion_id),
+        )
+        self.db.commit()
+
+        if old_channel_id and old_message_id:
+            old_channel = interaction.guild.get_channel(int(old_channel_id))
+            if isinstance(old_channel, discord.TextChannel):
+                try:
+                    old_message = await old_channel.fetch_message(int(old_message_id))
+                    await old_message.edit(view=None)
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                    pass
+
+        await interaction.response.send_message(
+            f"✅ Reposted voting panel for motion #{motion_id}: {sent.jump_url}\n"
+            "Existing votes were preserved.",
+            ephemeral=True,
+        )
+
     @app_commands.command(name="motion_close", description="Close voting on a motion and publish final result.")
     @app_commands.guild_only()
     @app_commands.describe(motion_id="The motion number")

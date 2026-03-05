@@ -42,16 +42,22 @@ class MotionVoteSelect(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction):
         await self.cast(interaction, str(self.values[0]))
 
+    async def _send_ephemeral(self, interaction: discord.Interaction, message: str):
+        if interaction.response.is_done():
+            await interaction.followup.send(message, ephemeral=True)
+        else:
+            await interaction.response.send_message(message, ephemeral=True)
+
     async def cast(self, interaction: discord.Interaction, choice: str):
         if not interaction.guild or not isinstance(interaction.user, discord.Member):
-            return await interaction.response.send_message("❌ Server-only.", ephemeral=True)
+            return await self._send_ephemeral(interaction, "❌ Server-only.")
 
         settings = get_settings(self.db, interaction.guild.id)
         if not settings:
-            return await interaction.response.send_message("❌ Server not configured. Run /setup first.", ephemeral=True)
+            return await self._send_ephemeral(interaction, "❌ Server not configured. Run /setup first.")
 
         if not has_parliament_role(interaction.user, settings):
-            return await interaction.response.send_message("❌ Only Parliament may vote on motions.", ephemeral=True)
+            return await self._send_ephemeral(interaction, "❌ Only Parliament may vote on motions.")
 
         cur = self.db.cursor()
         cur.execute(
@@ -60,11 +66,14 @@ class MotionVoteSelect(discord.ui.Select):
         )
         motion = cur.fetchone()
         if not motion or motion["status"] != "VOTING":
-            return await interaction.response.send_message("❌ Voting is not open for this motion.", ephemeral=True)
+            return await self._send_ephemeral(interaction, "❌ Voting is not open for this motion.")
 
         closes_at = parse_iso_utc(motion["closes_at"])
         if closes_at and datetime.now(timezone.utc) >= closes_at:
-            return await interaction.response.send_message("❌ Voting has already closed for this motion.", ephemeral=True)
+            return await self._send_ephemeral(interaction, "❌ Voting has already closed for this motion.")
+
+        if not interaction.response.is_done():
+            await interaction.response.defer(ephemeral=True)
 
         try:
             vote_columns = get_motion_vote_columns(self.db)
@@ -102,18 +111,21 @@ class MotionVoteSelect(discord.ui.Select):
         except sqlite3.IntegrityError as exc:
             message = str(exc).lower()
             if "unique constraint failed" in message:
-                return await interaction.response.send_message("🔒 Your vote is already recorded and locked.", ephemeral=True)
-            return await interaction.response.send_message("❌ Could not record vote due to a database constraint.", ephemeral=True)
+                return await self._send_ephemeral(interaction, "🔒 Your vote is already recorded and locked.")
+            return await self._send_ephemeral(interaction, "❌ Could not record vote due to a database constraint.")
         except (sqlite3.OperationalError, RuntimeError):
-            return await interaction.response.send_message("❌ Could not record vote due to a database schema mismatch.", ephemeral=True)
+            return await self._send_ephemeral(interaction, "❌ Could not record vote due to a database schema mismatch.")
         except sqlite3.DatabaseError:
-            return await interaction.response.send_message("❌ Could not record vote due to a database error.", ephemeral=True)
+            return await self._send_ephemeral(interaction, "❌ Could not record vote due to a database error.")
         except Exception:
-            return await interaction.response.send_message("🔒 Your vote is already recorded and locked.", ephemeral=True)
+            return await self._send_ephemeral(interaction, "🔒 Your vote is already recorded and locked.")
 
-        await self.on_vote_recorded(interaction.guild, self.motion_id)
-        # Acknowledge after callback so users only see success if tally refresh ran.
-        await interaction.response.send_message("✅ Vote recorded.", ephemeral=True)
+        try:
+            await self.on_vote_recorded(interaction.guild, self.motion_id)
+        except Exception:
+            return await self._send_ephemeral(interaction, "✅ Vote recorded. (Roll-call display will refresh shortly.)")
+
+        await self._send_ephemeral(interaction, "✅ Vote recorded.")
 
 
 class MotionVoteView(discord.ui.View):
