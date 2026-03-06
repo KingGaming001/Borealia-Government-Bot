@@ -18,7 +18,13 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
-from config_store import get_settings, has_king_role, has_voter_role, is_admin
+from config_store import (
+    get_settings,
+    has_associate_parliamentarian_role,
+    has_king_role,
+    has_parliament_role,
+    is_admin,
+)
 from commands.motion_utils import (
     build_assent_decision_embed,
     build_assent_request_embed,
@@ -498,9 +504,15 @@ class Motions(commands.Cog):
             return await interaction.response.send_message("❌ Server-only.", ephemeral=True)
 
         settings = get_settings(self.db, interaction.guild.id)
-        is_voter = isinstance(interaction.user, discord.Member) and has_voter_role(interaction.user, settings)
-        if not (is_admin(interaction, settings) or is_voter):
-            return await interaction.response.send_message("❌ Only admins or users with the voter role can create drafts.", ephemeral=True)
+        has_motion_create_access = isinstance(interaction.user, discord.Member) and (
+            has_parliament_role(interaction.user, settings)
+            or has_associate_parliamentarian_role(interaction.user, settings)
+        )
+        if not has_motion_create_access:
+            return await interaction.response.send_message(
+                "❌ Only users with the Parliament or Associate Parliamentarian role can create drafts.",
+                ephemeral=True,
+            )
 
         cur = self.db.cursor()
         cur.execute(
@@ -554,9 +566,15 @@ class Motions(commands.Cog):
             return await interaction.response.send_message("❌ Server-only.", ephemeral=True)
 
         settings = get_settings(self.db, interaction.guild.id)
-        is_voter = isinstance(interaction.user, discord.Member) and has_voter_role(interaction.user, settings)
-        if not (is_admin(interaction, settings) or is_voter):
-            return await interaction.response.send_message("❌ Only admins or users with the voter role can create repeal motions.", ephemeral=True)
+        has_motion_create_access = isinstance(interaction.user, discord.Member) and (
+            has_parliament_role(interaction.user, settings)
+            or has_associate_parliamentarian_role(interaction.user, settings)
+        )
+        if not has_motion_create_access:
+            return await interaction.response.send_message(
+                "❌ Only users with the Parliament or Associate Parliamentarian role can create repeal motions.",
+                ephemeral=True,
+            )
 
         act = await self.get_act(interaction.guild.id, act_id)
         if not act:
