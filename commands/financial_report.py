@@ -267,6 +267,13 @@ class FinancialReportCommand(commands.Cog):
         if opening_balance is not None and current_close is not None:
             net_value_change = current_close - opening_balance
 
+        expected_closing_balance = None
+        discrepancy = None
+        if opening_balance is not None:
+            expected_closing_balance = opening_balance + current_week["net_flow"]
+        if expected_closing_balance is not None and current_close is not None:
+            discrepancy = current_close - expected_closing_balance
+
         wow_delta = None
         if previous_close is not None and current_close is not None:
             wow_delta = current_close - previous_close
@@ -313,6 +320,12 @@ class FinancialReportCommand(commands.Cog):
                 f"• Closing Balance: **{_fmt_money(current_close)}**\n"
                 f"• Net Value Change: **{_fmt_money(net_value_change, signed=True)}**"
             ),
+            inline=False,
+        )
+
+        embed.add_field(
+            name="Discrepancy",
+            value=f"• Result: **{_fmt_money(discrepancy, signed=True)}**",
             inline=False,
         )
 
