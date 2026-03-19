@@ -289,6 +289,11 @@ def init_db(conn: sqlite3.Connection) -> None:
         pass
 
     try:
+        cur.execute("ALTER TABLE guild_settings ADD COLUMN cabinet_role_id INTEGER")
+    except sqlite3.OperationalError:
+        pass
+
+    try:
         cur.execute("ALTER TABLE guild_settings ADD COLUMN bank_transactions_channel_id INTEGER")
     except sqlite3.OperationalError:
         pass

@@ -36,6 +36,7 @@ def upsert_settings(
     parliament_role_id: int | None = None,
     associate_parliamentarian_role_id: int | None = None,
     king_role_id: int | None = None,
+    cabinet_role_id: int | None = None,
 ) -> None:
     """
     Insert or update guild settings.
@@ -68,6 +69,8 @@ def upsert_settings(
         fields["associate_parliamentarian_role_id"] = associate_parliamentarian_role_id
     if king_role_id is not None:
         fields["king_role_id"] = king_role_id
+    if cabinet_role_id is not None:
+        fields["cabinet_role_id"] = cabinet_role_id
 
     # Nothing to update
     if not fields:
@@ -131,6 +134,18 @@ def has_king_role(member: discord.Member, settings: dict | None) -> bool:
     if not king_role_id:
         return False
     return any(r.id == int(king_role_id) for r in member.roles)
+
+
+def has_cabinet_role(member: discord.Member, settings: dict | None) -> bool:
+    """
+    True if member has the configured cabinet role.
+    """
+    if not settings:
+        return False
+    cabinet_role_id = settings.get("cabinet_role_id")
+    if not cabinet_role_id:
+        return False
+    return any(r.id == int(cabinet_role_id) for r in member.roles)
 
 
 def is_admin(interaction: discord.Interaction, settings: dict | None) -> bool:

@@ -11,7 +11,7 @@ from typing import Any, Awaitable, Callable, cast
 import discord
 from discord.ext import commands
 
-from config_store import get_settings, has_parliament_role
+from config_store import get_settings, has_parliament_role, has_cabinet_role
 from commands.motion_utils import get_motion_vote_columns, parse_iso_utc
 
 
@@ -56,8 +56,8 @@ class MotionVoteSelect(discord.ui.Select):
         if not settings:
             return await self._send_ephemeral(interaction, "❌ Server not configured. Run /setup first.")
 
-        if not has_parliament_role(interaction.user, settings):
-            return await self._send_ephemeral(interaction, "❌ Only Parliament may vote on motions.")
+        if not (has_parliament_role(interaction.user, settings) or has_cabinet_role(interaction.user, settings)):
+            return await self._send_ephemeral(interaction, "❌ Only Parliament or Cabinet may vote on motions.")
 
         cur = self.db.cursor()
         cur.execute(

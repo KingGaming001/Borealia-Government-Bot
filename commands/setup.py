@@ -43,6 +43,7 @@ class SetupCommand(commands.Cog):
         parliament_role="Role required to vote on motions (optional)",
         associate_parliamentarian_role="Role allowed to nominate but not vote on motions (optional)",
         king_role="Role allowed to grant Royal Assent (optional)",
+        cabinet_role="Role allowed to vote on motions (optional)",
     )
     async def setup(
         self,
@@ -58,6 +59,7 @@ class SetupCommand(commands.Cog):
         parliament_role: discord.Role | None = None,
         associate_parliamentarian_role: discord.Role | None = None,
         king_role: discord.Role | None = None,
+        cabinet_role: discord.Role | None = None,
     ):
         # -----------------------------
         # Must be used in a server
@@ -99,6 +101,7 @@ class SetupCommand(commands.Cog):
             parliament_role_id=parliament_role.id if parliament_role else None,
             associate_parliamentarian_role_id=associate_parliamentarian_role.id if associate_parliamentarian_role else None,
             king_role_id=king_role.id if king_role else None,
+            cabinet_role_id=cabinet_role.id if cabinet_role else None,
 
         )
 
@@ -120,7 +123,9 @@ class SetupCommand(commands.Cog):
                 f"• **Log Channel:** {log_channel.mention if log_channel else 'Not Set'}\n"
                 f"• **Voter Role:** {voter_role.mention}\n"
                 f"• **Admin Role:** {admin_role.mention}\n"
+                f"• **Parliament Role:** {parliament_role.mention if parliament_role else 'Not Set'}\n"
                 f"• **Associate Parliamentarian Role:** {associate_parliamentarian_role.mention if associate_parliamentarian_role else 'Not Set'}\n"
+                f"• **Cabinet Role:** {cabinet_role.mention if cabinet_role else 'Not Set'}\n"
                 f"• **King Role:** {king_role.mention if king_role else 'Not Set'}\n"
             ),
             inline=False
