@@ -25,7 +25,7 @@ Built with `discord.py` and SQLite.
 	- Draft, open, vote, close
 	- 24-hour fixed voting window once opened
 	- Parliament-role-only voting
-	- Public Yes/No/Abstain roll-call
+	- Public Yes/No/Abstain roll-call with changeable votes
 	- Automatic conclusion message with final result
 	- If a motion passes, Royal Assent buttons appear (Approve/Reject) for the configured King role
 	- Approved motions are automatically posted into the laws channel

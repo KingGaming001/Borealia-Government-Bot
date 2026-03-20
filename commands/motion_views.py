@@ -79,11 +79,11 @@ class MotionVoteSelect(discord.ui.Select):
             vote_columns = get_motion_vote_columns(self.db)
             params = (interaction.guild.id, self.motion_id, interaction.user.id, choice)
 
-            # Insert path supports both legacy and migrated schemas.
+            # Insert or replace path supports both legacy and migrated schemas.
             if "choice" in vote_columns and "vote" in vote_columns:
                 cur.execute(
                     """
-                    INSERT INTO motion_votes (guild_id, motion_id, user_id, choice, vote)
+                    INSERT OR REPLACE INTO motion_votes (guild_id, motion_id, user_id, choice, vote)
                     VALUES (?, ?, ?, ?, ?)
                     """,
                     (interaction.guild.id, self.motion_id, interaction.user.id, choice, choice),
@@ -91,7 +91,7 @@ class MotionVoteSelect(discord.ui.Select):
             elif "choice" in vote_columns:
                 cur.execute(
                     """
-                    INSERT INTO motion_votes (guild_id, motion_id, user_id, choice)
+                    INSERT OR REPLACE INTO motion_votes (guild_id, motion_id, user_id, choice)
                     VALUES (?, ?, ?, ?)
                     """,
                     params,
@@ -99,7 +99,7 @@ class MotionVoteSelect(discord.ui.Select):
             elif "vote" in vote_columns:
                 cur.execute(
                     """
-                    INSERT INTO motion_votes (guild_id, motion_id, user_id, vote)
+                    INSERT OR REPLACE INTO motion_votes (guild_id, motion_id, user_id, vote)
                     VALUES (?, ?, ?, ?)
                     """,
                     params,
@@ -111,14 +111,14 @@ class MotionVoteSelect(discord.ui.Select):
         except sqlite3.IntegrityError as exc:
             message = str(exc).lower()
             if "unique constraint failed" in message:
-                return await self._send_ephemeral(interaction, "🔒 Your vote is already recorded and locked.")
+                return await self._send_ephemeral(interaction, "❌ Could not record vote due to a database constraint.")
             return await self._send_ephemeral(interaction, "❌ Could not record vote due to a database constraint.")
         except (sqlite3.OperationalError, RuntimeError):
             return await self._send_ephemeral(interaction, "❌ Could not record vote due to a database schema mismatch.")
         except sqlite3.DatabaseError:
             return await self._send_ephemeral(interaction, "❌ Could not record vote due to a database error.")
         except Exception:
-            return await self._send_ephemeral(interaction, "🔒 Your vote is already recorded and locked.")
+            return await self._send_ephemeral(interaction, "❌ Could not record vote due to an unexpected error.")
 
         try:
             await self.on_vote_recorded(interaction.guild, self.motion_id)
