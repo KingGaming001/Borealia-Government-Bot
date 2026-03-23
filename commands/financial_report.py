@@ -54,9 +54,15 @@ def _message_text(message: discord.Message) -> str:
     return "\n".join(parts)
 
 
-def _report_id_from_start(start_local: datetime) -> str:
-    iso = start_local.isocalendar()
-    return f"{iso.year}-W{iso.week:02d}"
+def _report_id_from_start(start_local: datetime, period: str = "weekly") -> str:
+    if period == "weekly":
+        iso = start_local.isocalendar()
+        return f"{iso.year}-W{iso.week:02d}"
+    if period == "monthly":
+        return f"{start_local.year}-{start_local.month:02d}"
+    if period == "yearly":
+        return f"{start_local.year}"
+    raise ValueError(f"Unsupported period: {period}")
 
 
 def _last_completed_week_bounds(week_offset: int = 0) -> tuple[datetime, datetime]:
@@ -72,6 +78,67 @@ def _last_completed_week_bounds(week_offset: int = 0) -> tuple[datetime, datetim
     start_local = this_week_start - timedelta(weeks=week_offset + 1)
     end_local = start_local + timedelta(days=7)
     return start_local, end_local
+
+
+def _last_completed_month_bounds(month_offset: int = 0) -> tuple[datetime, datetime]:
+    # Monthly report boundaries:
+    #   - month_offset=0: last completed month (e.g., if now is 2026-03-23, returns 2026-02-01 -> 2026-03-01)
+    #   - month_offset=1: one month earlier (2026-01-01 -> 2026-02-01), etc.
+    # This is used for /financial_report period=monthly and monthly auto-scheduling on day 1.
+    # It is inclusive start, exclusive end (UTC), and uses Europe/London timezone alignment.
+    now_local = datetime.now(LONDON_TZ)
+    this_month_start = now_local.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    target_month_number = this_month_start.month - (month_offset + 1)
+    target_year = this_month_start.year
+
+    while target_month_number <= 0:
+        target_month_number += 12
+        target_year -= 1
+
+    start_local = datetime(
+        target_year,
+        target_month_number,
+        1,
+        tzinfo=LONDON_TZ,
+    )
+
+    next_month_number = this_month_start.month - month_offset
+    next_year = this_month_start.year
+
+    while next_month_number <= 0:
+        next_month_number += 12
+        next_year -= 1
+
+    end_local = datetime(
+        next_year,
+        next_month_number,
+        1,
+        tzinfo=LONDON_TZ,
+    )
+
+    return start_local, end_local
+
+
+def _last_completed_year_bounds(year_offset: int = 0) -> tuple[datetime, datetime]:
+    # Yearly report boundaries:
+    #   - year_offset=0: last completed year (e.g., on 2026-03-23 it returns 2025-01-01 -> 2026-01-01)
+    #   - year_offset=1: previous completed year (2024-01-01 -> 2025-01-01), etc.
+    # This is used for /financial_report period=yearly and yearly auto-scheduling on Jan 1.
+    # It is inclusive start, exclusive end (UTC), and uses Europe/London timezone alignment.
+    now_local = datetime.now(LONDON_TZ)
+    this_year_start = now_local.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+    start_year = this_year_start.year - (year_offset + 1)
+
+    start_local = datetime(start_year, 1, 1, tzinfo=LONDON_TZ)
+    end_local = datetime(start_year + 1, 1, 1, tzinfo=LONDON_TZ)
+
+    return start_local, end_local
+
+
+def _shift_month(start_local: datetime, delta: int) -> datetime:
+    year = start_local.year + (start_local.month - 1 + delta) // 12
+    month = ((start_local.month - 1 + delta) % 12) + 1
+    return start_local.replace(year=year, month=month, day=1, hour=0, minute=0, second=0, microsecond=0)
 
 
 def _fmt_money(value: float | None, signed: bool = False) -> str:
@@ -96,12 +163,19 @@ class FinancialReportCommand(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.db: sqlite3.Connection = cast(Any, bot).db
+        # Start scheduler loops for each report cadence (weekly, monthly, yearly)
         if not self.weekly_report_loop.is_running():
             self.weekly_report_loop.start()
+        if not self.monthly_report_loop.is_running():
+            self.monthly_report_loop.start()
+        if not self.yearly_report_loop.is_running():
+            self.yearly_report_loop.start()
 
     async def cog_unload(self):
         if self.weekly_report_loop.is_running():
             self.weekly_report_loop.cancel()
+        if self.monthly_report_loop.is_running():
+            self.monthly_report_loop.cancel()
 
     def _report_exists(self, guild_id: int, report_id: str) -> bool:
         cur = self.db.cursor()
@@ -257,12 +331,13 @@ class FinancialReportCommand(commands.Cog):
         report_id: str,
         start_local: datetime,
         end_local: datetime,
-        current_week: dict,
+        current_period: dict,
         previous_close: float | None,
         opening_balance: float | None,
+        period: str = "weekly",
         is_preview: bool = False,
     ) -> discord.Embed:
-        current_close = current_week["closing_balance"]
+        current_close = current_period["closing_balance"]
         net_value_change = None
         if opening_balance is not None and current_close is not None:
             net_value_change = current_close - opening_balance
@@ -283,8 +358,11 @@ class FinancialReportCommand(commands.Cog):
         else:
             wow_pct_text = "N/A"
 
+        title_text = "🏦 Weekly Financial Report" if period == "weekly" else "🏦 Monthly Financial Report" if period == "monthly" else "🏦 Yearly Financial Report"
+        comparison_label = "Week-over-Week" if period == "weekly" else "Month-over-Month" if period == "monthly" else "Year-over-Year"
+
         embed = discord.Embed(
-            title="🏦 Weekly Financial Report",
+            title=title_text,
             description=(
                 f"**Period:** {start_local.strftime('%Y-%m-%d %H:%M %Z')} → "
                 f"{(end_local - timedelta(seconds=1)).strftime('%Y-%m-%d %H:%M %Z')}"
@@ -296,9 +374,9 @@ class FinancialReportCommand(commands.Cog):
         embed.add_field(
             name="Transactions",
             value=(
-                f"• Completed Deposits: **{current_week['deposit_count']}**\n"
-                f"• Completed Withdrawals: **{current_week['withdrawal_count']}**\n"
-                f"• Rejected/Pending (excluded): **{current_week['pending_or_rejected']}**"
+                f"• Completed Deposits: **{current_period['deposit_count']}**\n"
+                f"• Completed Withdrawals: **{current_period['withdrawal_count']}**\n"
+                f"• Rejected/Pending (excluded): **{current_period['pending_or_rejected']}**"
             ),
             inline=False,
         )
@@ -306,9 +384,9 @@ class FinancialReportCommand(commands.Cog):
         embed.add_field(
             name="Money Flow",
             value=(
-                f"• Total Deposited: **{_fmt_money(current_week['total_deposited'], signed=True)}**\n"
-                f"• Total Withdrawn: **-{_fmt_money(current_week['total_withdrawn'])}**\n"
-                f"• Net Flow: **{_fmt_money(current_week['net_flow'], signed=True)}**"
+                f"• Total Deposited: **{_fmt_money(current_period['total_deposited'], signed=True)}**\n"
+                f"• Total Withdrawn: **-{_fmt_money(current_period['total_withdrawn'])}**\n"
+                f"• Net Flow: **{_fmt_money(current_period['net_flow'], signed=True)}**"
             ),
             inline=False,
         )
@@ -330,7 +408,7 @@ class FinancialReportCommand(commands.Cog):
         )
 
         embed.add_field(
-            name="Week-over-Week",
+            name=comparison_label,
             value=(
                 f"• Previous Closing Balance: **{_fmt_money(previous_close)}**\n"
                 f"• Current Closing Balance: **{_fmt_money(current_close)}**\n"
@@ -350,16 +428,30 @@ class FinancialReportCommand(commands.Cog):
         channel: discord.TextChannel,
         start_local: datetime,
         end_local: datetime,
+        period: str = "weekly",
         is_preview: bool = False,
     ) -> tuple[str, discord.Embed]:
-        report_id = _report_id_from_start(start_local)
+        report_id = _report_id_from_start(start_local, period=period)
 
-        current_week = await self._collect_week_data(channel, start_local, end_local)
+        current_period = await self._collect_week_data(channel, start_local, end_local)
 
-        previous_start = start_local - timedelta(days=7)
+        if period == "weekly":
+            previous_start = start_local - timedelta(days=7)
+        elif period == "monthly":
+            previous_start = _shift_month(start_local, -1)
+        elif period == "yearly":
+            previous_start = datetime(
+                start_local.year - 1,
+                1,
+                1,
+                tzinfo=LONDON_TZ,
+            )
+        else:
+            raise ValueError(f"Unsupported period: {period}")
+
         previous_end = start_local
-        previous_week = await self._collect_week_data(channel, previous_start, previous_end)
-        previous_close = previous_week["closing_balance"]
+        previous_period = await self._collect_week_data(channel, previous_start, previous_end)
+        previous_close = previous_period["closing_balance"]
 
         opening_balance = previous_close
         if opening_balance is None:
@@ -369,9 +461,10 @@ class FinancialReportCommand(commands.Cog):
             report_id=report_id,
             start_local=start_local,
             end_local=end_local,
-            current_week=current_week,
+            current_period=current_period,
             previous_close=previous_close,
             opening_balance=opening_balance,
+            period=period,
             is_preview=is_preview,
         )
 
@@ -386,13 +479,14 @@ class FinancialReportCommand(commands.Cog):
         mode: str,
         generated_by: int | None,
         force: bool,
+        period: str = "weekly",
     ) -> tuple[bool, str | None]:
-        report_id = _report_id_from_start(start_local)
+        report_id = _report_id_from_start(start_local, period=period)
 
         if not force and self._report_exists(guild.id, report_id):
             return False, None
 
-        _, embed = await self._generate_embed_for_period(channel, start_local, end_local)
+        _, embed = await self._generate_embed_for_period(channel, start_local, end_local, period=period)
 
         sent = await channel.send(embed=embed)
 
@@ -443,28 +537,134 @@ class FinancialReportCommand(commands.Cog):
                     mode="AUTO",
                     generated_by=None,
                     force=False,
+                    period="weekly",
                 )
             except Exception as exc:
                 print(f"❌ Weekly financial report failed for guild {guild.id}: {exc!r}")
+                traceback.print_exception(type(exc), exc, exc.__traceback__)
+
+    @tasks.loop(hours=1)
+    async def monthly_report_loop(self):
+        # Monthly auto-report scheduler:
+        # - runs once per hour
+        # - only processes when clock is 00:00 on day 1 (Europe/London)
+        # - generates report covering the previous month (e.g., Mar 1 triggers Feb report)
+        # - avoids clock drift and restart issues by re-evaluating every hour
+        now_local = datetime.now(LONDON_TZ)
+
+        if now_local.day != 1:
+            return
+        if now_local.hour != 0:
+            return
+
+        start_local, end_local = _last_completed_month_bounds(month_offset=0)
+
+        for guild in self.bot.guilds:
+            try:
+                settings = get_settings(self.db, guild.id)
+                if not settings:
+                    continue
+
+                bank_channel_id = settings.get("bank_transactions_channel_id")
+                if not bank_channel_id:
+                    continue
+
+                channel = guild.get_channel(int(bank_channel_id))
+                if not isinstance(channel, discord.TextChannel):
+                    continue
+
+                await self._generate_and_post(
+                    guild=guild,
+                    channel=channel,
+                    start_local=start_local,
+                    end_local=end_local,
+                    mode="AUTO",
+                    generated_by=None,
+                    force=False,
+                    period="monthly",
+                )
+            except Exception as exc:
+                print(f"❌ Monthly financial report failed for guild {guild.id}: {exc!r}")
+                traceback.print_exception(type(exc), exc, exc.__traceback__)
+
+    @tasks.loop(hours=1)
+    async def yearly_report_loop(self):
+        # Yearly auto-report scheduler:
+        # - runs once per hour
+        # - only processes at Jan 1 00:00 (Europe/London)
+        # - generates report for the previous year (e.g., 2027-01-01 triggers 2026 report)
+        # - avoids missing an execution if bot restarts around the boundary time
+        now_local = datetime.now(LONDON_TZ)
+
+        if now_local.month != 1 or now_local.day != 1:
+            return
+        if now_local.hour != 0:
+            return
+
+        start_local, end_local = _last_completed_year_bounds(year_offset=0)
+
+        for guild in self.bot.guilds:
+            try:
+                settings = get_settings(self.db, guild.id)
+                if not settings:
+                    continue
+
+                bank_channel_id = settings.get("bank_transactions_channel_id")
+                if not bank_channel_id:
+                    continue
+
+                channel = guild.get_channel(int(bank_channel_id))
+                if not isinstance(channel, discord.TextChannel):
+                    continue
+
+                await self._generate_and_post(
+                    guild=guild,
+                    channel=channel,
+                    start_local=start_local,
+                    end_local=end_local,
+                    mode="AUTO",
+                    generated_by=None,
+                    force=False,
+                    period="yearly",
+                )
+            except Exception as exc:
+                print(f"❌ Yearly financial report failed for guild {guild.id}: {exc!r}")
                 traceback.print_exception(type(exc), exc, exc.__traceback__)
 
     @weekly_report_loop.before_loop
     async def before_weekly_report_loop(self):
         await self.bot.wait_until_ready()
 
+    @monthly_report_loop.before_loop
+    async def before_monthly_report_loop(self):
+        await self.bot.wait_until_ready()
+
+    @yearly_report_loop.before_loop
+    async def before_yearly_report_loop(self):
+        await self.bot.wait_until_ready()
+
     @app_commands.command(
         name="financial_report",
-        description="Generate a weekly nation bank financial report"
+        description="Generate a nation bank financial report"
     )
     @app_commands.describe(
-        week_offset="0 = last completed week, 1 = week before, etc.",
-        force="Re-generate even if that week's report already exists",
+        period="weekly or monthly report",
+        period_offset="0 = last completed period, 1 = previous period, etc.",
+        force="Re-generate even if that report already exists",
         preview="Generate privately without posting or saving report record",
+    )
+    @app_commands.choices(
+        period=[
+            app_commands.Choice(name="weekly", value="weekly"),
+            app_commands.Choice(name="monthly", value="monthly"),
+            app_commands.Choice(name="yearly", value="yearly"),
+        ]
     )
     async def financial_report(
         self,
         interaction: discord.Interaction,
-        week_offset: app_commands.Range[int, 0, 12] = 0,
+        period: app_commands.Choice[str],
+        period_offset: app_commands.Range[int, 0, 12] = 0,
         force: bool = False,
         preview: bool = False,
     ):
@@ -508,13 +708,22 @@ class FinancialReportCommand(commands.Cog):
 
         await interaction.response.defer(ephemeral=True, thinking=True)
 
-        start_local, end_local = _last_completed_week_bounds(week_offset=int(week_offset))
-        report_id = _report_id_from_start(start_local)
+        chosen_period = period.value if isinstance(period, app_commands.Choice) else period
+        offset = int(period_offset)
+
+        if chosen_period == "monthly":
+            start_local, end_local = _last_completed_month_bounds(month_offset=offset)
+        elif chosen_period == "yearly":
+            start_local, end_local = _last_completed_year_bounds(year_offset=offset)
+        else:
+            start_local, end_local = _last_completed_week_bounds(week_offset=offset)
+
+        report_id = _report_id_from_start(start_local, period=chosen_period)
 
         if preview:
-            _, embed = await self._generate_embed_for_period(channel, start_local, end_local, is_preview=True)
+            _, embed = await self._generate_embed_for_period(channel, start_local, end_local, period=chosen_period, is_preview=True)
             await interaction.followup.send(
-                content=f"🧪 Preview for weekly report **{report_id}** (not posted).",
+                content=f"🧪 Preview for {chosen_period} report **{report_id}** (not posted).",
                 embed=embed,
                 ephemeral=True,
             )
@@ -528,6 +737,7 @@ class FinancialReportCommand(commands.Cog):
             mode="MANUAL",
             generated_by=interaction.user.id,
             force=force,
+            period=chosen_period,
         )
 
         if not posted and not force:
@@ -538,7 +748,7 @@ class FinancialReportCommand(commands.Cog):
             return
 
         await interaction.followup.send(
-            f"✅ Generated weekly financial report **{report_id}** in {channel.mention}."
+            f"✅ Generated {chosen_period} financial report **{report_id}** in {channel.mention}."
             + (f"\n{jump_url}" if jump_url else ""),
             ephemeral=True,
         )
