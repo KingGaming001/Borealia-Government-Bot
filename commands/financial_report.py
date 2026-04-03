@@ -530,13 +530,13 @@ class FinancialReportCommand(commands.Cog):
 
     @tasks.loop(hours=1)
     async def weekly_report_loop(self):
-        # Run hourly but only execute report generation at local Monday 00:00.
+        # Run hourly but only execute report generation at local Monday 01:00.
         # This avoids brittle long-sleep scheduling and handles restarts cleanly.
         now_local = datetime.now(LONDON_TZ)
 
         if now_local.weekday() != 0:
             return
-        if now_local.hour != 0:
+        if now_local.hour != 1:
             return
 
         start_local, end_local = _last_completed_week_bounds(week_offset=0)
@@ -573,14 +573,14 @@ class FinancialReportCommand(commands.Cog):
     async def monthly_report_loop(self):
         # Monthly auto-report scheduler:
         # - runs once per hour
-        # - only processes when clock is 00:00 on day 1 (Europe/London)
+        # - only processes when clock is 01:00 on day 1 (Europe/London)
         # - generates report covering the previous month (e.g., Mar 1 triggers Feb report)
         # - avoids clock drift and restart issues by re-evaluating every hour
         now_local = datetime.now(LONDON_TZ)
 
         if now_local.day != 1:
             return
-        if now_local.hour != 0:
+        if now_local.hour != 1:
             return
 
         start_local, end_local = _last_completed_month_bounds(month_offset=0)
@@ -617,14 +617,14 @@ class FinancialReportCommand(commands.Cog):
     async def yearly_report_loop(self):
         # Yearly auto-report scheduler:
         # - runs once per hour
-        # - only processes at Jan 1 00:00 (Europe/London)
+        # - only processes at Jan 1 01:00 (Europe/London)
         # - generates report for the previous year (e.g., 2027-01-01 triggers 2026 report)
         # - avoids missing an execution if bot restarts around the boundary time
         now_local = datetime.now(LONDON_TZ)
 
         if now_local.month != 1 or now_local.day != 1:
             return
-        if now_local.hour != 0:
+        if now_local.hour != 1:
             return
 
         start_local, end_local = _last_completed_year_bounds(year_offset=0)
