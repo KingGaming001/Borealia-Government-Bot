@@ -300,6 +300,12 @@ class FinancialReportCommand(commands.Cog):
             if t["type"] == "deposit" and t.get("is_nortco_metro")
         )
 
+        nortco_daily_by_weekday = {i: 0.0 for i in range(7)}
+        for t in completed_transactions:
+            if t["type"] == "deposit" and t.get("is_nortco_metro"):
+                dt_local = t["created_at"].astimezone(LONDON_TZ)
+                nortco_daily_by_weekday[dt_local.weekday()] += t["amount"]
+
         closing_balance = None
         for txn in reversed(completed_transactions):
             if txn["balance_after"] is not None:
@@ -317,6 +323,7 @@ class FinancialReportCommand(commands.Cog):
             "net_flow": total_deposited - total_withdrawn,
             "closing_balance": closing_balance,
             "nortco_total": nortco_total,
+            "nortco_daily_by_weekday": nortco_daily_by_weekday,
             "nortco_allocation": {
                 "national_bank": nortco_total * 0.70,
                 "toronto_town_bank": nortco_total * 0.20,
@@ -344,6 +351,7 @@ class FinancialReportCommand(commands.Cog):
         start_local: datetime,
         end_local: datetime,
         current_period: dict,
+        previous_period: dict,
         previous_close: float | None,
         opening_balance: float | None,
         period: str = "weekly",
@@ -369,6 +377,14 @@ class FinancialReportCommand(commands.Cog):
             wow_pct_text = f"{(wow_delta / abs(previous_close)) * 100:+.2f}%"
         else:
             wow_pct_text = "N/A"
+
+        def _pct_change(curr: float, prev: float | None) -> str:
+            if prev is None or prev == 0:
+                if curr == 0:
+                    return "⚪ 0.00%"
+                return "🟢 +∞%" if curr > 0 else "🔴 -∞%"
+            delta = curr - prev
+            return f"{'🟢' if delta >= 0 else '🔴'} {delta / abs(prev) * 100:+.2f}%"
 
         title_text = "🏦 Weekly Financial Report" if period == "weekly" else "🏦 Monthly Financial Report" if period == "monthly" else "🏦 Yearly Financial Report"
         comparison_label = "Week-over-Week" if period == "weekly" else "Month-over-Month" if period == "monthly" else "Year-over-Year"
@@ -416,6 +432,25 @@ class FinancialReportCommand(commands.Cog):
                 ),
                 inline=False,
             )
+
+            if period == "weekly":
+                current_daily = current_period.get("nortco_daily_by_weekday", {})
+                previous_daily = previous_period.get("nortco_daily_by_weekday", {})
+                days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+                daily_lines = []
+                for i, day_name in enumerate(days):
+                    day_current = current_daily.get(i, 0.0)
+                    day_previous = previous_daily.get(i, 0.0)
+                    pct_change = _pct_change(day_current, day_previous)
+                    daily_lines.append(
+                        f"• {day_name}: **{_fmt_money(day_current)}** ({pct_change})"
+                    )
+
+                embed.add_field(
+                    name="Nortco Metro Daily Breakdown",
+                    value="\n".join(daily_lines),
+                    inline=False,
+                )
 
         embed.add_field(
             name="Balance Snapshot",
@@ -488,6 +523,7 @@ class FinancialReportCommand(commands.Cog):
             start_local=start_local,
             end_local=end_local,
             current_period=current_period,
+            previous_period=previous_period,
             previous_close=previous_close,
             opening_balance=opening_balance,
             period=period,
