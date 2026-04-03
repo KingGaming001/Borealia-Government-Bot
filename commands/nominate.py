@@ -25,6 +25,7 @@ from config_store import (
     has_associate_parliamentarian_role,
     has_parliament_role,
     is_admin,
+    has_voter_role,
 )
 
 LONDON_TZ = ZoneInfo("Europe/London")
@@ -207,6 +208,44 @@ class PositionSelect(discord.ui.Select):
                 ephemeral=True,
             )
             return
+
+        # Special eligibility check for Prime Minister elections
+        if position == "Prime Minister":
+            settings = get_settings(self.bot.db, self.guild_id)
+            
+            # Check if user has Mayor role (same as Parliament role)
+            if not has_parliament_role(interaction.user, settings):
+                await interaction.response.send_message(
+                    "❌ You must have the Mayor role to nominate for Prime Minister.",
+                    ephemeral=True
+                )
+                return
+            
+            # Check if user has been a citizen for at least 2 weeks (same as Voter role)
+            if not has_voter_role(interaction.user, settings):
+                await interaction.response.send_message(
+                    "❌ You must have the Citizen role to nominate for Prime Minister.",
+                    ephemeral=True
+                )
+                return
+            
+            # Check membership duration (using joined_at as proxy for citizenship start)
+            if interaction.user.joined_at:
+                membership_duration = now_utc - interaction.user.joined_at.replace(tzinfo=timezone.utc)
+                if membership_duration < timedelta(weeks=2):
+                    weeks_needed = 2 - (membership_duration.days / 7)
+                    await interaction.response.send_message(
+                        f"❌ You must have continuous membership for at least 2 weeks to nominate for Prime Minister. "
+                        f"You need {weeks_needed:.1f} more weeks.",
+                        ephemeral=True
+                    )
+                    return
+            else:
+                await interaction.response.send_message(
+                    "❌ Unable to verify your membership duration. Please contact an administrator.",
+                    ephemeral=True
+                )
+                return
 
         cur.execute(
             """

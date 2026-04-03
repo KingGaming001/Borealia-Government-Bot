@@ -25,6 +25,7 @@ import hashlib
 import traceback
 import importlib
 import sqlite3
+import calendar
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from typing import cast
@@ -351,6 +352,175 @@ async def election_scheduler():
         print(f"✅ Election started: {guild.name} | {position} | message_id={sent.id}")
 
 # ============================================================
+# Election announcer (automatic monthly elections)
+# ============================================================
+
+@tasks.loop(hours=6)
+async def election_announcer():
+    """
+    Every 6 hours:
+    - Check if it's 7 days before end of month
+    - If so, announce the general election and open nominations
+    """
+    now_utc = datetime.now(timezone.utc)
+    now_london = now_utc.astimezone(LONDON_TZ)
+    
+    # Calculate end of current month
+    year = now_london.year
+    month = now_london.month
+    _, last_day = calendar.monthrange(year, month)
+    end_of_month = datetime(year, month, last_day, 23, 59, 59, tzinfo=LONDON_TZ)
+    
+    # Check if it's exactly 7 days before end of month
+    seven_days_before = end_of_month - timedelta(days=7)
+    if not (seven_days_before.date() == now_london.date()):
+        return
+    
+    # Election starts at midnight on last day of month
+    election_start = datetime(year, month, last_day, 0, 0, 0, tzinfo=LONDON_TZ)
+    election_start_utc = election_start.astimezone(timezone.utc)
+    
+    # Results announced 24 hours later
+    results_time = election_start + timedelta(hours=24)
+    results_timestamp = int(results_time.timestamp())
+    election_timestamp = int(election_start.timestamp())
+    
+    position = "Prime Minister"
+    
+    cur = bot.db.cursor()
+    
+    # For each configured guild, check and announce
+    cur.execute("SELECT guild_id FROM guild_settings")
+    guilds = cur.fetchall()
+    
+    for row in guilds:
+        guild_id = int(row["guild_id"])
+        
+        # Calculate election number (count of completed elections + 1)
+        cur.execute(
+            "SELECT COUNT(*) as count FROM elections WHERE guild_id = ? AND position = ? AND status = 'CLOSED'",
+            (guild_id, position)
+        )
+        count_row = cur.fetchone()
+        election_number = int(count_row["count"]) + 1 if count_row else 1
+        
+        # Check if there's already an active election for this month
+        cur.execute(
+            """
+            SELECT status FROM elections 
+            WHERE guild_id = ? AND position = ? AND strftime('%Y-%m', start_at) = ?
+            """,
+            (guild_id, position, f"{year:04d}-{month:02d}")
+        )
+        existing = cur.fetchone()
+        if existing and existing["status"] != "CLOSED":
+            continue  # Already announced or active
+        
+        guild = bot.get_guild(guild_id)
+        if not guild:
+            continue
+        
+        settings = get_settings(bot.db, guild_id)
+        if not settings:
+            continue
+        
+        elections_channel_id = settings.get("elections_channel_id")
+        nominees_channel_id = settings.get("nominees_channel_id")
+        if not elections_channel_id or not nominees_channel_id:
+            continue
+        
+        elections_channel = guild.get_channel(int(elections_channel_id))
+        nominees_channel = guild.get_channel(int(nominees_channel_id))
+        if not elections_channel or not nominees_channel or not isinstance(elections_channel, discord.TextChannel) or not isinstance(nominees_channel, discord.TextChannel):
+            continue
+        
+        # Post announcement in elections channel
+        announcement = f""":ballot_box: {election_number} GENERAL ELECTION – NOMINATIONS NOW OPEN :ballot_box:
+
+||@everyone||
+
+By Order of The Crown, nominations are hereby opened for the **{election_number} General Election of the Kingdom of Borealia**.
+
+This election marks the continuation of Borealia's democratic tradition, as citizens once again prepare to determine the leadership and direction of the Kingdom. All nominations and voting procedures will be conducted through Borealia's official **Election System**, ensuring fairness, transparency, and order throughout the process.
+
+The election shall be held on **<t:{election_timestamp}:F>**, with the results to be announced on **<t:{results_timestamp}:F>**, in accordance with the Constitution of the Kingdom of Borealia.
+
+## :scroll: Eligibility Requirements
+
+A person shall be eligible for nomination only if they:
+
+* Are a **Mayor** of a recognised town within the Kingdom of Borealia; and
+* Have maintained continuous membership within the Kingdom for at least **two (2) weeks** prior to nomination.
+
+## :robot: Election Bot Commands
+
+This election will be managed through the official bot. The following commands will be used:
+
+* `/nominate` – Nominate yourself as a candidate in the General Election.
+
+Nominees can be viewed in #🤵│nominations.
+
+If you experience any issues with the election bot, please reach out and assistance will be provided.
+
+All candidates are strongly encouraged to publish a clear statement outlining their policies, priorities, and vision in #🪧│advertisements, so that voters may make an informed decision for the future of Borealia.
+
+Good luck to all who choose to stand.
+
+*— The Crown of Borealia* :crown:"""
+        
+        await elections_channel.send(announcement)
+        
+        # Open nominations by creating SCHEDULED election
+        cur2 = bot.db.cursor()
+        cur2.execute(
+            """
+            INSERT INTO elections (
+                guild_id, position, status, start_at,
+                nominee_message_id, vote_message_id,
+                created_by, created_at
+            )
+            VALUES (?, ?, 'SCHEDULED', ?, NULL, NULL, ?, ?)
+            ON CONFLICT(guild_id, position) DO UPDATE SET
+                status = 'SCHEDULED',
+                start_at = excluded.start_at,
+                vote_message_id = NULL
+            """,
+            (guild_id, position, election_start_utc.isoformat(), bot.user.id if bot.user else 0, now_utc.isoformat())
+        )
+        
+        # Clear any previous nominations and votes for fresh start
+        cur2.execute("DELETE FROM nominations WHERE guild_id = ? AND position = ?", (guild_id, position))
+        cur2.execute("DELETE FROM votes WHERE guild_id = ? AND position = ?", (guild_id, position))
+        
+        bot.db.commit()
+        
+        # Post nominees message in nominees channel
+        embed = discord.Embed(
+            title=f"🗳️ Nominations Open — {position}",
+            description=f"Nominations are now open.\n**Voting begins:** <t:{election_timestamp}:F>",
+            color=discord.Color.gold()
+        )
+        embed.add_field(
+            name="No nominees yet",
+            value="Use **/nominate** to nominate yourself.",
+            inline=False
+        )
+        
+        sent = await nominees_channel.send(embed=embed)
+        
+        cur2.execute(
+            "UPDATE elections SET nominee_message_id = ? WHERE guild_id = ? AND position = ?",
+            (sent.id, guild_id, position)
+        )
+        bot.db.commit()
+        
+        print(f"📢 Announced election for {guild.name}: {position} on {election_start}")
+
+@election_announcer.before_loop
+async def before_election_announcer():
+    await bot.wait_until_ready()
+
+# ============================================================
 # Helper function to close an election and DM results
 # ============================================================
 
@@ -388,6 +558,8 @@ async def auto_close_election(guild_id: int, position: str, admin_user: discord.
     if not settings:
         return None
     
+    now_utc = datetime.now(timezone.utc)
+    
     # Collect nominees
     cur.execute(
         """
@@ -423,18 +595,20 @@ async def auto_close_election(guild_id: int, position: str, admin_user: discord.
     results_lines = []
     winner_id = None
     winner_votes = 0
-    
+
+    tie_candidates = []
+
     for r in vote_rows:
         cid = int(r["candidate_id"])
         v = int(r["votes"])
         display = name_by_id.get(cid, f"Unknown Candidate ({cid})")
         vote_share = (v / total_votes * 100) if total_votes > 0 else 0
         results_lines.append(f"• **{display}** — {v} vote(s) ({vote_share:.1f}%)")
-        
+
         if winner_id is None:
             winner_id = cid
             winner_votes = v
-    
+
     if not results_lines:
         results_lines.append("• *(No votes were recorded.)*")
     
@@ -470,6 +644,12 @@ async def auto_close_election(guild_id: int, position: str, admin_user: discord.
         second = int(vote_rows[1]["votes"])
         if second == top:
             is_tie = True
+
+    # If tie, identify tied candidates (top vote count)
+    if is_tie:
+        top_votes = int(vote_rows[0]["votes"])
+        tied_ids = [int(r["candidate_id"]) for r in vote_rows if int(r["votes"]) == top_votes]
+        tie_candidates = [n for n in nominees if n["user_id"] in tied_ids]
     
     # Mark election as CLOSED
     cur.execute(
@@ -524,6 +704,165 @@ async def auto_close_election(guild_id: int, position: str, admin_user: discord.
             except Exception:
                 pass
     
+    # Post public results announcement in elections channel
+    if elections_channel_id:
+        elections_channel = guild.get_channel(int(elections_channel_id))
+        if elections_channel and isinstance(elections_channel, discord.TextChannel):
+            # Build results announcement
+            if winner_id is None:
+                winner_text = "No winner was declared due to no votes being recorded."
+                winner_mention = ""
+            else:
+                if is_tie:
+                    # Find all candidates with the top vote count
+                    tied_candidates = []
+                    for r in vote_rows:
+                        if int(r["votes"]) == winner_votes:
+                            cid = int(r["candidate_id"])
+                            name = name_by_id.get(cid, f"Unknown Candidate ({cid})")
+                            tied_candidates.append(name)
+                    
+                    tied_names = ", ".join(tied_candidates)
+                    winner_text = f"A tie has occurred between the following candidates with {winner_votes} vote(s) each: {tied_names}. Manual tie-breaking is required by the Crown."
+                    winner_mention = ""
+                else:
+                    winner_name = name_by_id.get(winner_id, f"Unknown Candidate ({winner_id})")
+                    winner_text = f"is hereby declared Prime Minister of the Kingdom of Borealia, with {winner_votes} votes ({(winner_votes/total_votes*100):.1f}%)."
+                    winner_mention = f"<@{winner_id}>"  # Proper Discord mention
+            
+            # Calculate election number for results
+            cur2 = bot.db.cursor()
+            cur2.execute(
+                "SELECT COUNT(*) as count FROM elections WHERE guild_id = ? AND position = ? AND status = 'CLOSED'",
+                (guild_id, position)
+            )
+            count_row = cur2.fetchone()
+            election_number = int(count_row["count"]) if count_row else 0
+            
+            results_announcement = f"""# :ballot_box: {election_number} GENERAL ELECTION - OFFICIAL RESULTS :ballot_box:
+
+||@everyone||
+
+The voting period for the {election_number} General Election for the Prime Minister of the Kingdom of Borealia has officially concluded. The results have been verified in accordance with the Constitution and the established electoral procedures.
+
+~~--------------------------------------------------------------------------~~
+
+## :bar_chart: Voter Turnout
+
+{num_voters}/{num_eligible_voters} eligible voters - {turnout_pct:.1f}% turnout
+Total votes recorded: {total_votes}
+
+ ~~--------------------------------------------------------------------------~~
+
+## :scroll: Results
+
+{chr(10).join(results_lines)}
+
+~~--------------------------------------------------------------------------~~
+
+# :crown: Declaration
+
+Having received the highest number of valid votes cast,
+
+{winner_mention} {winner_text}
+
+Congratulations to the Prime Minister, and thank you to all candidates and citizens who participated in this election.
+
+_— The Crown of Borealia :crown:_"""
+            
+            try:
+                await elections_channel.send(results_announcement)
+                print(f"📊 Public election results announced in {guild.name}")
+            except Exception as e:
+                print(f"⚠️ Could not post public results: {e}")
+    
+    # Update Prime Minister role if this is a Prime Minister election
+    if position == "Prime Minister" and winner_id and not is_tie:
+        prime_minister_role_id = settings.get("prime_minister_role_id")
+        if prime_minister_role_id:
+            try:
+                prime_minister_role = guild.get_role(int(prime_minister_role_id))
+                if prime_minister_role:
+                    # Remove role from current holders
+                    current_holders = [member for member in guild.members if prime_minister_role in member.roles]
+                    for holder in current_holders:
+                        try:
+                            await holder.remove_roles(prime_minister_role, reason="Prime Minister election completed")
+                            print(f"👑 Removed Prime Minister role from {holder.display_name}")
+                        except Exception as e:
+                            print(f"⚠️ Could not remove Prime Minister role from {holder.display_name}: {e}")
+                    
+                    # Add role to winner
+                    winner_member = guild.get_member(winner_id)
+                    if winner_member:
+                        await winner_member.add_roles(prime_minister_role, reason="Elected as Prime Minister")
+                        print(f"👑 Assigned Prime Minister role to {winner_member.display_name}")
+                    else:
+                        print(f"⚠️ Could not find winner member {winner_id} to assign Prime Minister role")
+                else:
+                    print(f"⚠️ Prime Minister role {prime_minister_role_id} not found in guild")
+            except Exception as e:
+                print(f"⚠️ Error updating Prime Minister role: {e}")
+
+    # Tie resolution: schedule runoff election for tied candidates
+    if position == "Prime Minister" and is_tie and len(tie_candidates) >= 2:
+        runoff_position = f"{position} Runoff"
+        runoff_start = now_utc + timedelta(hours=1)
+        runoff_start_iso = runoff_start.isoformat()
+
+        # Create runoff election record
+        cur.execute(
+            """
+            INSERT INTO elections (
+                guild_id, position, status, start_at,
+                nominee_message_id, vote_message_id,
+                created_by, created_at
+            )
+            VALUES (?, ?, 'SCHEDULED', ?, NULL, NULL, ?, ?)
+            ON CONFLICT(guild_id, position) DO UPDATE SET
+                status = 'SCHEDULED',
+                start_at = excluded.start_at,
+                vote_message_id = NULL
+            """,
+            (guild_id, runoff_position, runoff_start_iso, bot.user.id if bot.user else 0, now_utc.isoformat())
+        )
+
+        # Reset runoff nominations and votes
+        cur.execute("DELETE FROM nominations WHERE guild_id = ? AND position = ?", (guild_id, runoff_position))
+        cur.execute("DELETE FROM votes WHERE guild_id = ? AND position = ?", (guild_id, runoff_position))
+        for c in tie_candidates:
+            cur.execute(
+                "INSERT OR IGNORE INTO nominations (guild_id, position, user_id, display_name) VALUES (?, ?, ?, ?)",
+                (guild_id, runoff_position, c["user_id"], c["display_name"])
+            )
+
+        bot.db.commit()
+
+        # Announce runoff
+        if elections_channel_id:
+            runoff_announcement = f"""# :ballot_box: PRIORITY RUNOFF ELECTION REQUIRED :ballot_box:
+
+||@everyone||
+
+The Prime Minister election has ended in a tie between: {', '.join([c['display_name'] for c in tie_candidates])}.
+
+A runoff election has been scheduled for **{runoff_start.astimezone(LONDON_TZ).strftime('%d %b %Y, %H:%M')} (Europe/London)**.
+
+## :robot: Runoff details
+- Position: {runoff_position}
+- Candidates: {', '.join([c['display_name'] for c in tie_candidates])}
+
+Voting will begin automatically at the scheduled time and last 24 hours.
+
+*— The Crown of Borealia* :crown:"""
+            try:
+                elections_channel = guild.get_channel(int(elections_channel_id))
+                if elections_channel and isinstance(elections_channel, discord.TextChannel):
+                    await elections_channel.send(runoff_announcement)
+                    print(f"📢 Runoff election scheduled in {guild.name} for {runoff_position}")
+            except Exception as e:
+                print(f"⚠️ Could not announce runoff election: {e}")
+
     # Build and send DM to admin
     start_at_iso = str(election["start_at"]) if election["start_at"] else None
     
@@ -549,14 +888,23 @@ async def auto_close_election(guild_id: int, position: str, admin_user: discord.
     if winner_id is None:
         dm_embed.add_field(name="Winner", value="No winner (no votes).", inline=False)
     else:
-        winner_name = name_by_id.get(winner_id, f"Unknown Candidate ({winner_id})")
         if is_tie:
+            # Find all candidates with the top vote count
+            tied_candidates = []
+            for r in vote_rows:
+                if int(r["votes"]) == winner_votes:
+                    cid = int(r["candidate_id"])
+                    name = name_by_id.get(cid, f"Unknown Candidate ({cid})")
+                    tied_candidates.append(f"**{name}**")
+            
+            tied_names = ", ".join(tied_candidates)
             dm_embed.add_field(
-                name="Winner",
-                value=f"⚠️ Tie detected at {winner_votes} vote(s). Top candidate: **{winner_name}** (tie-break required).",
+                name="⚠️ Tie Detected",
+                value=f"Multiple candidates tied with {winner_votes} vote(s) each: {tied_names}. Manual tie-breaking required.",
                 inline=False
             )
         else:
+            winner_name = name_by_id.get(winner_id, f"Unknown Candidate ({winner_id})")
             dm_embed.add_field(
                 name="Winner",
                 value=f"🏆 **{winner_name}** with {winner_votes} vote(s).",
@@ -837,6 +1185,10 @@ async def on_ready():
     if not election_auto_closer.is_running():
         election_auto_closer.start()
         print("⏰ Election auto-closer started (checks every 30s).")
+
+    if not election_announcer.is_running():
+        election_announcer.start()
+        print("📢 Election announcer started (checks every 6 hours).")
 
 
 @bot.tree.error
