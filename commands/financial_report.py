@@ -256,6 +256,7 @@ class FinancialReportCommand(commands.Cog):
 
         txn_type = type_match.group(1).strip().lower()
         status = status_match.group(1).strip().lower()
+        is_nortco_metro = "nortco metro" in text.lower()
 
         return {
             "type": txn_type,
@@ -264,6 +265,7 @@ class FinancialReportCommand(commands.Cog):
             "balance_after": balance_value,
             "created_at": message.created_at,
             "message_id": message.id,
+            "is_nortco_metro": is_nortco_metro,
         }
 
     async def _collect_week_data(
@@ -293,6 +295,10 @@ class FinancialReportCommand(commands.Cog):
 
         total_deposited = sum(t["amount"] for t in completed_transactions if t["type"] == "deposit")
         total_withdrawn = sum(t["amount"] for t in completed_transactions if t["type"] == "withdrawal")
+        nortco_total = sum(
+            t["amount"] for t in completed_transactions
+            if t["type"] == "deposit" and t.get("is_nortco_metro")
+        )
 
         closing_balance = None
         for txn in reversed(completed_transactions):
@@ -310,6 +316,12 @@ class FinancialReportCommand(commands.Cog):
             "total_withdrawn": total_withdrawn,
             "net_flow": total_deposited - total_withdrawn,
             "closing_balance": closing_balance,
+            "nortco_total": nortco_total,
+            "nortco_allocation": {
+                "national_bank": nortco_total * 0.70,
+                "toronto_town_bank": nortco_total * 0.20,
+                "staff_wages": nortco_total * 0.10,
+            },
         }
 
     async def _latest_balance_before(
@@ -390,6 +402,20 @@ class FinancialReportCommand(commands.Cog):
             ),
             inline=False,
         )
+
+        nortco_total = current_period.get("nortco_total", 0.0) or 0.0
+        if nortco_total > 0:
+            alloc = current_period.get("nortco_allocation", {})
+            embed.add_field(
+                name="Nortco Metro Take Allocation",
+                value=(
+                    f"• Nortco Metro Deposits: **{_fmt_money(nortco_total, signed=True)}**\n"
+                    f"• National Bank (70%): **{_fmt_money(alloc.get('national_bank'))}**\n"
+                    f"• Toronto Town Bank (20%): **{_fmt_money(alloc.get('toronto_town_bank'))}**\n"
+                    f"• Staff Wages (10%): **{_fmt_money(alloc.get('staff_wages'))}**"
+                ),
+                inline=False,
+            )
 
         embed.add_field(
             name="Balance Snapshot",
