@@ -20,10 +20,12 @@ from config_store import get_settings, is_admin
 
 LONDON_TZ = ZoneInfo("Europe/London")
 
-TYPE_RE = re.compile(r"^\s*Type:\s*(Deposit|Withdrawal)\s*$", re.IGNORECASE | re.MULTILINE)
-AMOUNT_RE = re.compile(r"^\s*Amount:\s*([^\n\r]+)$", re.IGNORECASE | re.MULTILINE)
-STATUS_RE = re.compile(r"^\s*Status:\s*(Pending|Completed|Rejected)\s*$", re.IGNORECASE | re.MULTILINE)
-BALANCE_RE = re.compile(r"^\s*Balance\s*After:\s*([^\n\r]+)$", re.IGNORECASE | re.MULTILINE)
+# REMOVED: strict line anchors (^ and $) that blocked matches with emojis or spaces
+TYPE_RE = re.compile(r"Type:\s*(Deposit|Withdrawal)", re.IGNORECASE | re.MULTILINE)
+# UPDATED: Now stops at the number and ignores trailing text like "500g"
+AMOUNT_RE = re.compile(r"Amount:\s*([\d,.]+)", re.IGNORECASE | re.MULTILINE)
+STATUS_RE = re.compile(r"Status:\s*(Pending|Completed|Rejected)", re.IGNORECASE | re.MULTILINE)
+BALANCE_RE = re.compile(r"Balance\s*After:\s*([\d,.]+)", re.IGNORECASE | re.MULTILINE)
 
 
 def _parse_amount(raw: str) -> float | None:
@@ -235,9 +237,9 @@ class FinancialReportCommand(commands.Cog):
         self.db.commit()
 
     def _parse_transaction(self, message: discord.Message) -> dict | None:
-        # Guardrail so unrelated channel chatter does not pollute the report.
-        text = _message_text(message)
-        if "nation bank transaction" not in text.lower():
+        # Guardrail: Accepts "Nation Bank", "National Bank", etc.
+        text = _message_text(message).lower()
+        if "nation" not in text or "bank" not in text:
             return None
 
         type_match = TYPE_RE.search(text)
@@ -248,6 +250,7 @@ class FinancialReportCommand(commands.Cog):
         if not type_match or not amount_match or not status_match:
             return None
 
+        # Clean the amount (now handles "500g" correctly)
         amount_value = _parse_amount(amount_match.group(1))
         if amount_value is None:
             return None
@@ -256,7 +259,7 @@ class FinancialReportCommand(commands.Cog):
 
         txn_type = type_match.group(1).strip().lower()
         status = status_match.group(1).strip().lower()
-        is_nortco_metro = "nortco metro" in text.lower()
+        is_nortco_metro = "nortco metro" in text
 
         return {
             "type": txn_type,
