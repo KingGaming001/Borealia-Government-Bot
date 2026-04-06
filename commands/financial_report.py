@@ -21,7 +21,7 @@ from config_store import get_settings, is_admin
 LONDON_TZ = ZoneInfo("Europe/London")
 
 # REMOVED: strict line anchors (^ and $) that blocked matches with emojis or spaces
-TYPE_RE = re.compile(r"Type:\s*(Deposit|Withdrawal)", re.IGNORECASE | re.MULTILINE)
+TYPE_RE = re.compile(r"Type:\s*(Deposit|Withdraw(?:al)?)", re.IGNORECASE | re.MULTILINE)
 # UPDATED: Now stops at the number and ignores trailing text like "500g"
 AMOUNT_RE = re.compile(r"Amount:\s*([\d,.]+)", re.IGNORECASE | re.MULTILINE)
 STATUS_RE = re.compile(r"Status:\s*(Pending|Completed|Rejected)", re.IGNORECASE | re.MULTILINE)
