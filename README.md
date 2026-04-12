@@ -33,7 +33,8 @@ Built with `discord.py` and SQLite.
 
 ## Tech Stack
 
-- Python 3.11+
+- Python 3.11+ <br> 
+[ Install python-pip & python-venv if not automatically installed ]
 - `discord.py>=2.3.0`
 - `python-dotenv>=1.0.0`
 - `tzdata` (timezone support, especially on Windows)
@@ -78,19 +79,30 @@ Minimum recommended bot permissions (if not using **Administrator**):
 
 After this, place your token in `.env` as `DISCORD_TOKEN`.
 
-## Local Project Setup
+## Local Project Setup (Within Host)
 
 ### 1) Clone and enter project
 
+Windows:
 ```powershell
 cd "C:\Users\YOURUSER\Documents\Borealia Government Bot"
 ```
-
+Linux:
+``` bash
+cd $HOME/Borealia-Government-Bot
+```
 ### 2) Create virtual environment
 
+Windows: 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
+```
+
+Linux: 
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
 ```
 
 ### 3) Install dependencies
@@ -112,12 +124,15 @@ TEST_GUILD_ID=123456789012345678
 `TEST_GUILD_ID` is optional. Leave it unset for global sync.
 
 ### 5) Run the bot
-
+Windows:
 ```powershell
 python main.py
 ```
-
-## First-Time Server Configuration
+Linux:
+```bash
+python3 main.py
+```
+## First-Time Server Configuration (Within Discord)
 
 Run `/setup` (server admins or configured admin role only):
 
@@ -188,7 +203,16 @@ Automatic behavior:
 
 - The bot also attempts to auto-generate the report every Monday for each configured guild.
 
----
+#### `/financial_current`
+Generate a mid week nation bank summary from transaction posts in the configured bank channel.
+
+Behavior:
+
+- Parses transaction messages matching the Nation Bank template
+- Includes `Completed` transactions only in totals
+- Posts the report in the configured `bank_transactions_channel`
+
+**Can only be seen by user executing command**
 
 ### Elections
 
